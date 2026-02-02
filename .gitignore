@@ -1,5 +1,9 @@
-# Build directories
-build/
+# Build directories (track .yaml and training_data inside build/)
+build/*
+!build/*.yaml
+!build/**/*.yaml
+!build/training_data/
+!build/training_data/**
 cmake-build-*/
 out/
 
