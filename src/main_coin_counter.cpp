@@ -138,14 +138,14 @@ namespace
     tracker.update(detections);
     cv::Mat display = draw_coins_and_histogram(warped, tracker, ratio_px_to_mm, calibration, svm, show_debug, classifier_name);
     cv::imshow("Anti-Glare Detection", display);
-    if (show_debug)
-    {
-      cv::Mat blurred = coin::preprocess_for_circles(warped);
-      cv::imshow("Preprocess", blurred);
-      cv::Mat edges;
-      cv::Canny(blurred, edges, coin::Config::CANNY_THRESHOLD1, coin::Config::CANNY_THRESHOLD2);
-      cv::imshow("Canny", edges);
-    }
+    // if (show_debug)
+    // {
+    //   cv::Mat blurred = coin::preprocess_for_circles(warped);
+    //   cv::imshow("Preprocess", blurred);
+    //   cv::Mat edges;
+    //   cv::Canny(blurred, edges, coin::Config::CANNY_THRESHOLD1, coin::Config::CANNY_THRESHOLD2);
+    //   cv::imshow("Canny", edges);
+    // }
     return true;
   }
 
@@ -196,6 +196,7 @@ int main()
 
   while (true)
   {
+    double t_frame_start = cv::getTickCount();
     cv::Mat frame;
     if (!cap.read(frame))
     {
@@ -242,6 +243,9 @@ int main()
           contour[0].emplace_back(static_cast<int>(raw_corners->at<float>(i, 0)), static_cast<int>(raw_corners->at<float>(i, 1)));
         cv::drawContours(frame, contour, -1, cv::Scalar(0, 255, 0), 2);
       }
+      double fps = cv::getTickFrequency() / (cv::getTickCount() - t_frame_start);
+      cv::putText(frame, "FPS: " + std::to_string(static_cast<int>(std::round(fps))),
+                  cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 255, 0), 2);
       cv::imshow("Scanner", frame);
     }
     catch (const cv::Exception &e)
