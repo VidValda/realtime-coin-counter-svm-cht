@@ -103,24 +103,24 @@ namespace coin
 
   std::optional<cv::Mat> find_paper_corners(const cv::Mat &frame)
   {
-    cv::Mat lab, l_ch;
-    cv::cvtColor(frame, lab, 44);
-    std::vector<cv::Mat> channels;
-    cv::split(lab, channels);
-    l_ch = channels[0];
+    cv::Mat gray, gray_blurred, gray_filtered;
+    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+    cv::GaussianBlur(gray, gray_blurred, cv::Size(7, 7), 0);
+    cv::medianBlur(gray_blurred, gray_filtered, 7);
     cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(0);
     std::vector<cv::Vec4f> lines;
-    lsd->detect(l_ch, lines);
-    cv::Mat line_mask = cv::Mat::zeros(l_ch.size(), CV_8UC1);
+    lsd->detect(gray_filtered, lines);
+    cv::Mat line_mask = cv::Mat::zeros(gray_filtered.size(), CV_8UC1);
     for (const auto &line : lines)
     {
       double dx = line[2] - line[0], dy = line[3] - line[1];
-      if (std::hypot(dx, dy) > 100)
+      if (std::hypot(dx, dy) > Config::PAPER_LINE_MIN_LENGTH)
       {
         cv::line(line_mask, cv::Point(line[0], line[1]), cv::Point(line[2], line[3]), 255, 3);
       }
     }
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+    int k = std::max(1, Config::PAPER_MORPH_KERNEL | 1);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k, k));
     cv::Mat closed;
     cv::morphologyEx(line_mask, closed, cv::MORPH_CLOSE, kernel);
     cv::dilate(closed, closed, kernel);
@@ -136,8 +136,8 @@ namespace coin
       const auto &cnt = contours[i];
       double peri = cv::arcLength(cnt, true);
       std::vector<cv::Point> approx;
-      cv::approxPolyDP(cnt, approx, 0.02 * peri, true);
-      if (approx.size() == 4 && cv::contourArea(approx) > 10000)
+      cv::approxPolyDP(cnt, approx, Config::PAPER_APPROX_EPS_FACTOR * peri, true);
+      if (approx.size() == 4 && cv::contourArea(approx) > Config::PAPER_MIN_AREA)
       {
         cv::Mat corners(4, 2, CV_32F);
         for (int j = 0; j < 4; ++j)

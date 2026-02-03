@@ -53,6 +53,12 @@ namespace coin
     static constexpr double PAPER_HEIGHT_MM = 216.0;
     static constexpr double SCALE_FACTOR = 3.0;
 
+    static constexpr int PAPER_LINE_MIN_LENGTH = 100;
+    static constexpr int PAPER_MORPH_KERNEL = 3;
+    static constexpr double PAPER_APPROX_EPS_FACTOR = 0.02;
+    static constexpr int PAPER_MIN_AREA = 10000;
+    static constexpr int STABILIZER_WINDOW = 10;
+
     static constexpr int CLUSTER_COLORS_BGR[6][3] = {
         {180, 119, 31}, {14, 127, 255}, {44, 160, 44}, {40, 39, 214}, {189, 103, 148}, {75, 86, 140}};
 

@@ -144,7 +144,7 @@ int main()
   ensure_training_dirs(zones);
   ensure_manifest_header();
 
-  coin::CornerStabilizer stabilizer(5);
+  coin::CornerStabilizer stabilizer(coin::Config::STABILIZER_WINDOW);
   coin::CoinTracker tracker;
   cv::Mat dst_corners = (cv::Mat_<float>(4, 2) << 0, 0, WIDTH_PX - 1, 0, WIDTH_PX - 1, HEIGHT_PX - 1, 0, HEIGHT_PX - 1);
 

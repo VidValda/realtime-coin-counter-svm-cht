@@ -164,7 +164,7 @@ int main()
 
   std::cout << "Using px-to-mm ratio: " << ratio_px_to_mm << " mm/px (from SCALE_FACTOR).\n";
 
-  coin::CornerStabilizer stabilizer(5);
+  coin::CornerStabilizer stabilizer(coin::Config::STABILIZER_WINDOW);
   coin::CoinTracker tracker;
   cv::Mat dst_corners = (cv::Mat_<float>(4, 2) << 0, 0, width_px - 1, 0, width_px - 1, height_px - 1, 0, height_px - 1);
 

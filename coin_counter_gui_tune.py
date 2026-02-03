@@ -62,9 +62,9 @@ def default_params() -> dict:
         "PAPER_HEIGHT_MM": 216.0,
         "SCALE_FACTOR": 3.0,
         "keep_frac": 0.8,
-        "stabilizer_window": 5,
+        "stabilizer_window": 10,
         "paper_line_min_length": 100,
-        "paper_morph_kernel": 5,
+        "paper_morph_kernel": 3,
         "paper_approx_eps_factor": 0.02,
         "paper_min_area": 10000,
         "camera_index": 2,
@@ -413,22 +413,30 @@ def collect_coin_features(frame_bgr: np.ndarray, entries: List[Tuple[Tuple[int, 
             rows.append((diameter_mm, lab[0], lab[1], lab[2]))
     return rows
 
+def _ensure_odd(k: int) -> int:
+    return max(1, k | 1)
+
+
 def find_paper_corners(frame: np.ndarray, p: dict) -> Optional[np.ndarray]:
-    l_ch = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)[:, :, 0]
+    """Paper detection: same pipeline as debug_paper_detection.py (gray + GaussianBlur + medianBlur, LSD)."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray_blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    gray_filtered = cv2.medianBlur(gray_blurred, 7)
     lsd = cv2.createLineSegmentDetector(0)
-    lines = lsd.detect(l_ch)
+    lines = lsd.detect(gray_filtered)
     lines = lines[0] if lines is not None and len(lines) > 0 else []
-    line_mask = np.zeros_like(l_ch)
+    line_mask = np.zeros_like(gray_filtered)
     for line in lines:
         x1, y1, x2, y2 = map(int, line[0])
         if np.hypot(x2 - x1, y2 - y1) > p["paper_line_min_length"]:
             cv2.line(line_mask, (x1, y1), (x2, y2), 255, 3)
-    k = p["paper_morph_kernel"]
+    k = _ensure_odd(p["paper_morph_kernel"])
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
     closed = cv2.dilate(cv2.morphologyEx(line_mask, cv2.MORPH_CLOSE, kernel), kernel)
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for cnt in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
-        approx = cv2.approxPolyDP(cnt, p["paper_approx_eps_factor"] * cv2.arcLength(cnt, True), True)
+        eps = p["paper_approx_eps_factor"] * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, eps, True)
         if len(approx) == 4 and cv2.contourArea(approx) > p["paper_min_area"]:
             return approx.reshape(4, 2).astype(np.float32)
     return None
