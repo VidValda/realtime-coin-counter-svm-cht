@@ -46,8 +46,8 @@ namespace coin
         "coin_svm.yaml", "coin_knn.yaml", "coin_rtrees.yaml", "coin_nb.yaml"};
     static constexpr const char *CLASSIFIER_NAMES[4] = {"SVM", "KNN", "RandomForest", "NaiveBayes"};
     static constexpr const char *CLASSIFIER_DEFAULT_FILE = "classifier_default.txt";
-    static constexpr const char *TRAINING_DATA_DIR = "training_data";
-    static constexpr const char *TRAINING_MANIFEST = "training_data/manifest.csv";
+    static constexpr const char *TRAINING_DATA_DIR = "training_data_2";
+    static constexpr const char *TRAINING_MANIFEST = "training_data_2/manifest.csv";
 
     static constexpr double PAPER_WIDTH_MM = 330.0;
     static constexpr double PAPER_HEIGHT_MM = 216.0;

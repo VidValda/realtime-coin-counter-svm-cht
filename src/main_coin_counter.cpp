@@ -30,23 +30,20 @@ namespace
   }
 
   cv::Mat draw_coins_and_histogram(const cv::Mat &frame, coin::CoinTracker &tracker,
-                                   double ratio_px_to_mm, const coin::CalibrationData *calibration,
-                                   coin::SVMClassifier &svm, bool show_debug,
+                                   double ratio_px_to_mm, coin::SVMClassifier &svm, bool show_debug,
                                    const std::string &classifier_name = "SVM")
   {
     cv::Mat display;
     frame.copyTo(display);
     auto entries = tracker.get_stable_entries();
-    auto rows = coin::collect_coin_features(frame, entries, ratio_px_to_mm, calibration);
+    auto rows = coin::collect_coin_features(frame, entries, ratio_px_to_mm);
     double total_eur = 0.0;
 
     for (size_t i = 0; i < entries.size(); ++i)
     {
       const auto &e = entries[i];
-      int r = coin::diameter_mm_to_radius_px(e.first.x, e.first.y, e.second, ratio_px_to_mm, calibration);
-      double display_diameter_mm = calibration
-                                       ? coin::pixel_diameter_to_mm(e.first.x, e.first.y, 2.0 * r, ratio_px_to_mm, calibration)
-                                       : e.second;
+      int r = coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm);
+      double display_diameter_mm = e.second;
       cv::Scalar color(0, 255, 0);
       if (i < rows.size())
       {
@@ -121,8 +118,7 @@ namespace
   }
 
   bool run_coin_detection(const cv::Mat &warped, double ratio_px_to_mm,
-                          coin::CoinTracker &tracker, const coin::CalibrationData *calibration,
-                          coin::SVMClassifier &svm, bool show_debug, const std::string &classifier_name)
+                          coin::CoinTracker &tracker, coin::SVMClassifier &svm, bool show_debug, const std::string &classifier_name)
   {
     const double keep_frac = 0.8;
     int cw = static_cast<int>(warped.cols * keep_frac);
@@ -132,11 +128,11 @@ namespace
     cv::Rect roi(cx, cy, cw, ch);
     cv::Mat warped_crop = warped(roi).clone();
 
-    auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, calibration);
+    auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm);
     for (auto &d : detections)
       d.center += cv::Point2i(roi.x, roi.y);
     tracker.update(detections);
-    cv::Mat display = draw_coins_and_histogram(warped, tracker, ratio_px_to_mm, calibration, svm, show_debug, classifier_name);
+    cv::Mat display = draw_coins_and_histogram(warped, tracker, ratio_px_to_mm, svm, show_debug, classifier_name);
     cv::imshow("Anti-Glare Detection", display);
     // if (show_debug)
     // {
@@ -166,9 +162,7 @@ int main()
   int width_px = static_cast<int>(coin::Config::PAPER_WIDTH_MM * coin::Config::SCALE_FACTOR);
   int height_px = static_cast<int>(coin::Config::PAPER_HEIGHT_MM * coin::Config::SCALE_FACTOR);
 
-  auto calibration = coin::load_calibration(coin::Config::CALIBRATION_PATH);
-  if (calibration.has_value())
-    std::cout << "Using calibration from " << coin::Config::CALIBRATION_PATH << std::endl;
+  std::cout << "Using px-to-mm ratio: " << ratio_px_to_mm << " mm/px (from SCALE_FACTOR).\n";
 
   coin::CornerStabilizer stabilizer(5);
   coin::CoinTracker tracker;
@@ -191,8 +185,6 @@ int main()
   }
   std::cout << "Classifier: " << coin::Config::CLASSIFIER_NAMES[classifier_index]
             << " (press 1-4 to switch)\n";
-
-  const coin::CalibrationData *cal_ptr = calibration.has_value() ? &*calibration : nullptr;
 
   while (true)
   {
@@ -227,7 +219,7 @@ int main()
           cv::warpPerspective(frame, warped, M, cv::Size(width_px, height_px));
           if (!warped.empty())
           {
-            run_coin_detection(warped, ratio_px_to_mm, tracker, cal_ptr, svm, true,
+            run_coin_detection(warped, ratio_px_to_mm, tracker, svm, true,
                                coin::Config::CLASSIFIER_NAMES[classifier_index]);
             cv::Mat warped_small;
             cv::resize(warped, warped_small, cv::Size(), 0.5, 0.5);

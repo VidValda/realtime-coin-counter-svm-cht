@@ -28,7 +28,7 @@ namespace coin
   }
 
   std::optional<Detection> measure_circle_diameter(const cv::Mat &frame_gray,
-                                                   int x, int y, int r, double ratio_px_to_mm, const CalibrationData *calibration)
+                                                   int x, int y, int r, double ratio_px_to_mm)
   {
     int h = frame_gray.rows, w = frame_gray.cols;
     cv::Mat mask = cv::Mat::zeros(h, w, CV_8UC1);
@@ -54,16 +54,14 @@ namespace coin
     cv::Point2f center;
     float radius;
     cv::minEnclosingCircle(*it, center, radius);
-    int cx = static_cast<int>(center.x), cy = static_cast<int>(center.y);
     double diameter_px = 2.0 * radius;
-    double diameter_mm = pixel_diameter_to_mm(cx, cy, diameter_px, ratio_px_to_mm, calibration);
+    double diameter_mm = pixel_diameter_to_mm(diameter_px, ratio_px_to_mm);
     if (diameter_mm < Config::DIAMETER_MM_MIN || diameter_mm > Config::DIAMETER_MM_MAX)
       return std::nullopt;
-    return Detection{cv::Point2i(cx, cy), diameter_mm};
+    return Detection{cv::Point2i(static_cast<int>(center.x), static_cast<int>(center.y)), diameter_mm};
   }
 
-  Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm,
-                                      const CalibrationData *calibration)
+  Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm)
   {
     cv::Mat blurred = preprocess_for_circles(frame);
     cv::Mat edges;
@@ -79,7 +77,7 @@ namespace coin
       int x = static_cast<int>(std::round(c[0]));
       int y = static_cast<int>(std::round(c[1]));
       int r = static_cast<int>(std::round(c[2]));
-      auto result = measure_circle_diameter(gray, x, y, r, ratio_px_to_mm, calibration);
+      auto result = measure_circle_diameter(gray, x, y, r, ratio_px_to_mm);
       if (result.has_value())
         detections.push_back(*result);
     }
@@ -206,12 +204,12 @@ namespace coin
 
   std::vector<CoinFeature> collect_coin_features(const cv::Mat &frame_bgr,
                                                  const std::vector<std::pair<cv::Point2i, double>> &entries,
-                                                 double ratio_px_to_mm, const CalibrationData *calibration)
+                                                 double ratio_px_to_mm)
   {
     std::vector<CoinFeature> rows;
     for (const auto &e : entries)
     {
-      int r = diameter_mm_to_radius_px(e.first.x, e.first.y, e.second, ratio_px_to_mm, calibration);
+      int r = diameter_mm_to_radius_px(e.second, ratio_px_to_mm);
       auto lab = sample_mean_lab_inside_circle(frame_bgr, e.first, r);
       if (lab.has_value())
       {

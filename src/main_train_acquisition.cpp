@@ -136,12 +136,7 @@ int main()
   cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
   cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
 
-  auto calibration = coin::load_calibration(coin::Config::CALIBRATION_PATH);
-  const coin::CalibrationData *cal_ptr = calibration.has_value() ? &*calibration : nullptr;
-  if (calibration.has_value())
-    std::cout << "Using calibration from " << coin::Config::CALIBRATION_PATH << std::endl;
-  else
-    std::cout << "No calibration found; using simple ratio for diameter." << std::endl;
+  std::cout << "Using px-to-mm ratio: " << RATIO_PX_TO_MM << " mm/px (from SCALE_FACTOR)." << std::endl;
 
   std::mt19937 rng(static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
   std::vector<Zone> zones = build_randomized_zones(rng);
@@ -208,13 +203,12 @@ int main()
         prev_x = z.limit_x;
       }
 
-      auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM, cal_ptr);
+      auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM);
       tracker.update(detections);
       auto entries = tracker.get_stable_entries();
       for (const auto &e : entries)
       {
-        int r = cal_ptr ? coin::diameter_mm_to_radius_px(e.first.x, e.first.y, e.second, RATIO_PX_TO_MM, cal_ptr)
-                        : static_cast<int>((e.second / RATIO_PX_TO_MM) / 2);
+        int r = coin::diameter_mm_to_radius_px(e.second, RATIO_PX_TO_MM);
         cv::circle(debug_warped, e.first, r, cv::Scalar(0, 255, 0), 2);
       }
       cv::Mat small;
@@ -241,7 +235,7 @@ int main()
       cv::Mat M = cv::getPerspectiveTransform(rect, dst_corners);
       cv::Mat warped;
       cv::warpPerspective(frame, warped, M, cv::Size(WIDTH_PX, HEIGHT_PX));
-      auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM, cal_ptr);
+      auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM);
       std::vector<std::pair<cv::Point2i, double>> entries;
       for (const auto &d : detections)
         entries.emplace_back(d.center, d.diameter_mm);
@@ -261,8 +255,7 @@ int main()
         }
         if (label_id < 0 || !zone_ptr)
           continue;
-        int radius_px = cal_ptr ? coin::diameter_mm_to_radius_px(e.first.x, e.first.y, e.second, RATIO_PX_TO_MM, cal_ptr)
-                                : static_cast<int>((e.second / RATIO_PX_TO_MM) / 2);
+        int radius_px = coin::diameter_mm_to_radius_px(e.second, RATIO_PX_TO_MM);
         if (radius_px < 5)
           continue;
         int pad = std::min(10, radius_px / 2);

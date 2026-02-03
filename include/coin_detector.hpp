@@ -14,10 +14,9 @@ namespace coin
     std::vector<cv::Vec3f> find_circle_candidates(const cv::Mat &blurred);
 
     std::optional<Detection> measure_circle_diameter(const cv::Mat &frame_gray,
-                                                     int x, int y, int r, double ratio_px_to_mm, const CalibrationData *calibration);
+                                                     int x, int y, int r, double ratio_px_to_mm);
 
-    Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm,
-                                        const CalibrationData *calibration);
+    Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm);
 
     std::optional<cv::Mat> find_paper_corners(const cv::Mat &frame);
 
@@ -28,6 +27,6 @@ namespace coin
 
     std::vector<CoinFeature> collect_coin_features(const cv::Mat &frame_bgr,
                                                    const std::vector<std::pair<cv::Point2i, double>> &entries,
-                                                   double ratio_px_to_mm, const CalibrationData *calibration);
+                                                   double ratio_px_to_mm);
 
 }
