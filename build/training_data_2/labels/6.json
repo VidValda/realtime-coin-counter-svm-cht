@@ -1,0 +1,157 @@
+{
+  "imagePath": "6.png",
+  "imageHeight": 1179,
+  "imageWidth": 1802,
+  "shapes": [
+    {
+      "label": "10cent",
+      "center": [257, 438],
+      "radius": 59
+    },
+    {
+      "label": "1euro",
+      "center": [1679, 452],
+      "radius": 70
+    },
+    {
+      "label": "20cent",
+      "center": [380, 451],
+      "radius": 65
+    },
+    {
+      "label": "1euro",
+      "center": [1514, 452],
+      "radius": 67
+    },
+    {
+      "label": "5cent",
+      "center": [1213, 449],
+      "radius": 60
+    },
+    {
+      "label": "20cent",
+      "center": [495, 480],
+      "radius": 65
+    },
+    {
+      "label": "10cent",
+      "center": [135, 476],
+      "radius": 60
+    },
+    {
+      "label": "5cent",
+      "center": [1330, 502],
+      "radius": 61
+    },
+    {
+      "label": "1cent",
+      "center": [766, 527],
+      "radius": 46
+    },
+    {
+      "label": "1euro",
+      "center": [1591, 546],
+      "radius": 68
+    },
+    {
+      "label": "2cent",
+      "center": [909, 540],
+      "radius": 52
+    },
+    {
+      "label": "10cent",
+      "center": [224, 546],
+      "radius": 60
+    },
+    {
+      "label": "5cent",
+      "center": [1220, 564],
+      "radius": 62
+    },
+    {
+      "label": "1cent",
+      "center": [694, 563],
+      "radius": 46
+    },
+    {
+      "label": "2cent",
+      "center": [1013, 577],
+      "radius": 53
+    },
+    {
+      "label": "20cent",
+      "center": [508, 604],
+      "radius": 65
+    },
+    {
+      "label": "5cent",
+      "center": [1333, 615],
+      "radius": 60
+    },
+    {
+      "label": "10cent",
+      "center": [140, 611],
+      "radius": 58
+    },
+    {
+      "label": "2cent",
+      "center": [912, 639],
+      "radius": 53
+    },
+    {
+      "label": "1cent",
+      "center": [763, 628],
+      "radius": 45
+    },
+    {
+      "label": "20cent",
+      "center": [396, 652],
+      "radius": 65
+    },
+    {
+      "label": "1euro",
+      "center": [1683, 670],
+      "radius": 67
+    },
+    {
+      "label": "5cent",
+      "center": [1236, 672],
+      "radius": 61
+    },
+    {
+      "label": "2cent",
+      "center": [1001, 675],
+      "radius": 53
+    },
+    {
+      "label": "10cent",
+      "center": [246, 683],
+      "radius": 56
+    },
+    {
+      "label": "1cent",
+      "center": [687, 679],
+      "radius": 47
+    },
+    {
+      "label": "1euro",
+      "center": [1540, 698],
+      "radius": 66
+    },
+    {
+      "label": "20cent",
+      "center": [484, 730],
+      "radius": 63
+    },
+    {
+      "label": "2cent",
+      "center": [935, 748],
+      "radius": 52
+    },
+    {
+      "label": "1cent",
+      "center": [731, 748],
+      "radius": 47
+    }
+  ]
+}
