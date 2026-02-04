@@ -5,9 +5,25 @@ namespace coin
 
   struct Config
   {
-    static constexpr int CLAHE_CLIP = 5;
-    static constexpr int CLAHE_GRID = 2;
-    static constexpr int BLUR_KSIZE = 5;
+    // Watershed pipeline (from debug_coin_detection.py defaults)
+    static constexpr int CLAHE_CLIP = 9;
+    static constexpr int CLAHE_GRID = 1;
+    static constexpr int BLUR_KSIZE = 9;
+    /** 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B */
+    static constexpr int CHANNEL_MODE = 2;
+    /** 0=Otsu, 1=Adaptive */
+    static constexpr int USE_ADAPTIVE = 0;
+    static constexpr int ADAPTIVE_BLOCK = 23;
+    static constexpr int ADAPTIVE_C = 10;
+    static constexpr int INVERT_BINARY = 1;
+    static constexpr int MORPH_OPEN_SIZE = 1;
+    static constexpr int MORPH_CLOSE_SIZE = 3;
+    static constexpr int MORPH_OPEN_ITERS = 2;
+    static constexpr int MORPH_CLOSE_ITERS = 4;
+    static constexpr int BG_DILATE_SIZE = 4;
+
+    static constexpr int DIST_MASK_SIZE = 5;
+    static constexpr double WATERSHED_FG_FRAC = 0.45;
 
     static constexpr double CANNY_THRESHOLD1 = 50.0;
     static constexpr double CANNY_THRESHOLD2 = 150.0;
@@ -19,8 +35,8 @@ namespace coin
     static constexpr int MIN_RADIUS_PX = 22;
     static constexpr int MAX_RADIUS_PX = 43;
 
-    static constexpr double MIN_CONTOUR_AREA = 100.0;
-    static constexpr double MIN_CIRCULARITY = 0.5;
+    static constexpr double MIN_CONTOUR_AREA = 464.0;
+    static constexpr double MIN_CIRCULARITY = 0.56;
     static constexpr double DIAMETER_MM_MIN = 10.0;
     static constexpr double DIAMETER_MM_MAX = 40.0;
 
@@ -52,6 +68,9 @@ namespace coin
     static constexpr double PAPER_APPROX_EPS_FACTOR = 0.02;
     static constexpr int PAPER_MIN_AREA = 10000;
     static constexpr int STABILIZER_WINDOW = 10;
+
+    /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
+    static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
 
     static constexpr int CLUSTER_COLORS_BGR[6][3] = {
         {180, 119, 31}, {14, 127, 255}, {44, 160, 44}, {40, 39, 214}, {189, 103, 148}, {75, 86, 140}};

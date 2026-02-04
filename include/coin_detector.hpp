@@ -9,6 +9,16 @@
 namespace coin
 {
 
+    /** Optional debug outputs: marker visualization and segmentation (watershed result). */
+    struct DebugViews
+    {
+        cv::Mat markers_vis;  /**< Colored markers (one color per label). */
+        cv::Mat segmentation; /**< Watershed segmentation overlay. */
+        cv::Mat binary;       /**< Binary after morph. */
+        cv::Mat sure_fg;      /**< Sure foreground. */
+        cv::Mat dist_vis;     /**< Distance transform visualization. */
+    };
+
     cv::Mat preprocess_for_circles(const cv::Mat &frame);
 
     std::vector<cv::Vec3f> find_circle_candidates(const cv::Mat &blurred);
@@ -16,7 +26,9 @@ namespace coin
     std::optional<Detection> measure_circle_diameter(const cv::Mat &frame_gray,
                                                      int x, int y, int r, double ratio_px_to_mm);
 
-    Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm);
+    /** Watershed-based coin detection. If out_debug is non-null, fills marker and segmentation views. */
+    Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm,
+                                        DebugViews *out_debug = nullptr);
 
     std::optional<cv::Mat> find_paper_corners(const cv::Mat &frame);
 

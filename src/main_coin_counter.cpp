@@ -14,6 +14,28 @@
 
 namespace
 {
+  /** Resize mat for display if wider than MAX_DISPLAY_WIDTH_PX to reduce memory and GUI pressure. */
+  cv::Mat for_display(const cv::Mat &mat)
+  {
+    if (mat.cols <= coin::Config::MAX_DISPLAY_WIDTH_PX || mat.empty())
+      return mat;
+    double scale = static_cast<double>(coin::Config::MAX_DISPLAY_WIDTH_PX) / mat.cols;
+    cv::Mat out;
+    cv::resize(mat, out, cv::Size(), scale, scale, cv::INTER_LINEAR);
+    return out;
+  }
+
+  void create_all_windows_once()
+  {
+    cv::namedWindow("Scanner", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Anti-Glare Detection", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Warped", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Debug: Markers", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Debug: Segmentation", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Debug: Binary", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Debug: Sure FG", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Debug: Distance", cv::WINDOW_AUTOSIZE);
+  }
 
   double get_ratio_px_to_mm()
   {
@@ -84,20 +106,24 @@ namespace
     cv::Rect roi(cx, cy, cw, ch);
     cv::Mat warped_crop = warped(roi).clone();
 
-    auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm);
+    coin::DebugViews debug;
+    auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, &debug);
     for (auto &d : detections)
       d.center += cv::Point2i(roi.x, roi.y);
     tracker.update(detections);
     cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name);
-    cv::imshow("Anti-Glare Detection", display);
-    // if (show_debug)
-    // {
-    //   cv::Mat blurred = coin::preprocess_for_circles(warped);
-    //   cv::imshow("Preprocess", blurred);
-    //   cv::Mat edges;
-    //   cv::Canny(blurred, edges, coin::Config::CANNY_THRESHOLD1, coin::Config::CANNY_THRESHOLD2);
-    //   cv::imshow("Canny", edges);
-    // }
+    cv::imshow("Anti-Glare Detection", for_display(display));
+
+    if (!debug.markers_vis.empty())
+      cv::imshow("Debug: Markers", for_display(debug.markers_vis));
+    if (!debug.segmentation.empty())
+      cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
+    // if (!debug.binary.empty())
+    //   cv::imshow("Debug: Binary", for_display(debug.binary));
+    // if (!debug.sure_fg.empty())
+    //   cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
+    // if (!debug.dist_vis.empty())
+    //   cv::imshow("Debug: Distance", for_display(debug.dist_vis));
     return true;
   }
 
@@ -113,6 +139,8 @@ int main()
   }
   cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
   cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+
+  create_all_windows_once();
 
   double ratio_px_to_mm = get_ratio_px_to_mm();
   int width_px = static_cast<int>(coin::Config::PAPER_WIDTH_MM * coin::Config::SCALE_FACTOR);
@@ -179,7 +207,7 @@ int main()
                                coin::Config::CLASSIFIER_NAMES[classifier_index]);
             cv::Mat warped_small;
             cv::resize(warped, warped_small, cv::Size(), 0.5, 0.5);
-            cv::imshow("Warped", warped_small);
+            cv::imshow("Warped", for_display(warped_small));
           }
         }
       }
@@ -194,7 +222,7 @@ int main()
       double fps = cv::getTickFrequency() / (cv::getTickCount() - t_frame_start);
       cv::putText(frame, "FPS: " + std::to_string(static_cast<int>(std::round(fps))),
                   cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 255, 0), 2);
-      cv::imshow("Scanner", frame);
+      cv::imshow("Scanner", for_display(frame));
     }
     catch (const cv::Exception &e)
     {
