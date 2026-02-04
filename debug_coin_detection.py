@@ -17,7 +17,7 @@ import numpy as np
 # Watershed + preprocessing defaults (from tuned GUI)
 DEFAULTS = {
     "CHANNEL_MODE": 2,  # 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B
-    "CLAHE_CLIP": 10,
+    "CLAHE_CLIP": 8,
     "CLAHE_GRID": 1,  # GUI showed 0; grid must be >= 1
     "BLUR_KSIZE": 9,
     "use_adaptive": 0,  # 0=Otsu, 1=Adaptive
@@ -27,12 +27,12 @@ DEFAULTS = {
     "morph_open_size": 1,
     "morph_close_size": 3,
     "morph_open_iters": 2,
-    "morph_close_iters": 1,
-    "bg_dilate_size": 17,
+    "morph_close_iters": 4,
+    "bg_dilate_size": 4,
     "dist_mask_size": 5,  # 3 or 5 (slider 1 → 5)
-    "watershed_fg_frac": 0.57,  # FG frac x100 = 57
-    "MIN_CONTOUR_AREA": 68.0,
-    "MIN_CIRCULARITY": 0.50,
+    "watershed_fg_frac": 0.45,  # FG frac x100 = 57
+    "MIN_CONTOUR_AREA": 464,
+    "MIN_CIRCULARITY": 0.56,
     "DIAMETER_MM_MIN": 10.0,
     "DIAMETER_MM_MAX": 40.0,
     "CENTER_MATCH_PX": 20,
@@ -252,6 +252,7 @@ def detect_coins_watershed(
     # 7. Markers
     num_labels, markers = cv2.connectedComponents(sure_fg)
     markers = markers.astype(np.int32)
+    markers = markers + 1
     markers[unknown == 255] = 0
     # Visualize markers (color by label)
     np.random.seed(42)
@@ -262,20 +263,19 @@ def detect_coins_watershed(
     steps.markers_vis = markers_vis
 
     # 8. Watershed
+    watershed_input = cv2.cvtColor(steps.after_close, cv2.COLOR_GRAY2BGR)
     markers_out = markers.copy()
-    watershed_input = cv2.cvtColor(steps.binary, cv2.COLOR_GRAY2BGR)
     cv2.imshow("Watershed input", watershed_input)
     cv2.watershed(watershed_input, markers_out)
 
+
     # 9. Extract regions and measure; build watershed vis
     detections: List[Tuple[Tuple[int, int], float]] = []
-    watershed_vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    watershed_vis = watershed_input
     colors = [np.array(np.random.randint(50, 255, 3), dtype=np.float64) for _ in range(num_labels + 1)]
 
     for label in range(2, num_labels + 1):
         mask = np.uint8(markers_out == label)
-        if mask.sum() < 10:
-            continue
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             continue
