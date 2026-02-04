@@ -61,7 +61,7 @@ namespace coin
 
     static constexpr double PAPER_WIDTH_MM = 330.0;
     static constexpr double PAPER_HEIGHT_MM = 216.0;
-    static constexpr double SCALE_FACTOR = 5;
+    static constexpr double SCALE_FACTOR = 5.46104;
 
     static constexpr int PAPER_LINE_MIN_LENGTH = 100;
     static constexpr int PAPER_MORPH_KERNEL = 3;

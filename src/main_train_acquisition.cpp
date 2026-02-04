@@ -10,10 +10,7 @@
 #include <vector>
 #include <string>
 #include <fstream>
-#include <map>
 #include <algorithm>
-#include <random>
-#include <chrono>
 #include <sys/stat.h>
 #include <filesystem>
 #include <regex>
@@ -26,37 +23,63 @@ namespace
   constexpr double RATIO_PX_TO_MM = 1.0 / coin::Config::SCALE_FACTOR;
   constexpr int ZONE_WIDTH = WIDTH_PX / 6;
 
+  const char *IMAGES_DIR = "images";
+  const char *LABELS_DIR = "labels";
+
+  /** Class id to label string for JSON (index = class_id). */
+  const char *CLASS_LABELS[] = {"20cent", "10cent", "1euro", "1cent", "2cent", "5cent"};
+
   struct Zone
   {
     int limit_x;
     const char *name;
-    const char *dir_name;
     int class_id;
   };
 
   struct ClassInfo
   {
     const char *name;
-    const char *dir_name;
     int class_id;
   };
 
-  std::vector<Zone> build_randomized_zones(std::mt19937 &rng)
+  struct Shape
+  {
+    std::string label;
+    int center_x, center_y;
+    int radius;
+  };
+
+  const ClassInfo CLASSES[] = {
+      {"20 cent", 0},
+      {"10 cent", 1},
+      {"1 Euro", 2},
+      {"1 cent", 3},
+      {"2 cent", 4},
+      {"5 cent", 5}};
+
+  /** 6 fixed sequences: each row is the class_id order for zones left-to-right. */
+  const int SEQUENCES[6][6] = {
+      {0, 1, 2, 3, 4, 5}, /* seq 0: 20c, 10c, 1€, 1c, 2c, 5c */
+      {1, 0, 3, 4, 5, 2}, /* seq 1 */
+      {2, 3, 4, 5, 0, 1}, /* seq 2 */
+      {3, 4, 5, 0, 1, 2}, /* seq 3 */
+      {4, 5, 0, 1, 2, 3}, /* seq 4 */
+      {5, 0, 1, 2, 3, 4}, /* seq 5 */
+  };
+
+  std::vector<Zone> build_zones_for_sequence(int sequence_index)
   {
     const int limits[] = {ZONE_WIDTH * 1, ZONE_WIDTH * 2, ZONE_WIDTH * 3, ZONE_WIDTH * 4, ZONE_WIDTH * 5, 9999};
-    const ClassInfo classes[] = {
-        {"20 cent", "20cent", 0},
-        {"10 cent", "10cent", 1},
-        {"1 Euro", "1euro", 2},
-        {"1 cent", "1cent", 3},
-        {"2 cent", "2cent", 4},
-        {"5 cent", "5cent", 5}};
-    std::vector<int> perm = {0, 1, 2, 3, 4, 5};
-    std::shuffle(perm.begin(), perm.end(), rng);
+    sequence_index = sequence_index % 6;
+    if (sequence_index < 0)
+      sequence_index += 6;
     std::vector<Zone> zones;
     zones.reserve(6);
     for (int i = 0; i < 6; ++i)
-      zones.push_back({limits[i], classes[perm[i]].name, classes[perm[i]].dir_name, classes[perm[i]].class_id});
+    {
+      int class_id = SEQUENCES[sequence_index][i];
+      zones.push_back({limits[i], CLASSES[class_id].name, class_id});
+    }
     return zones;
   }
 
@@ -72,40 +95,21 @@ namespace
 #endif
   }
 
-  void ensure_training_dirs(const std::vector<Zone> &zones)
+  void ensure_training_dirs(const std::string &base_dir)
   {
-    ensure_dir(coin::Config::TRAINING_DATA_DIR);
-    for (const auto &z : zones)
-      ensure_dir(std::string(coin::Config::TRAINING_DATA_DIR) + "/" + z.dir_name);
+    ensure_dir(base_dir);
+    ensure_dir(base_dir + "/" + IMAGES_DIR);
+    ensure_dir(base_dir + "/" + LABELS_DIR);
   }
 
-  void ensure_manifest_header()
-  {
-    std::ifstream in(coin::Config::TRAINING_MANIFEST);
-    if (in.good())
-      return;
-    std::ofstream out(coin::Config::TRAINING_MANIFEST);
-    if (out)
-      out << "path,class_id,diameter_mm\n";
-  }
-
-  bool append_manifest(const std::string &path, int class_id, double diameter_mm)
-  {
-    std::ofstream out(coin::Config::TRAINING_MANIFEST, std::ios::app);
-    if (!out)
-      return false;
-    out << path << "," << class_id << "," << std::fixed << diameter_mm << "\n";
-    return true;
-  }
-
-  int get_next_index_for_dir(const std::string &dir_path)
+  int get_next_image_index(const std::string &images_dir)
   {
     namespace fs = std::filesystem;
     std::regex num_re(R"((\d+)\.png)", std::regex::icase);
     int max_n = -1;
-    if (!fs::is_directory(dir_path))
+    if (!fs::is_directory(images_dir))
       return 0;
-    for (const auto &entry : fs::directory_iterator(dir_path))
+    for (const auto &entry : fs::directory_iterator(images_dir))
     {
       if (!entry.is_regular_file())
         continue;
@@ -117,15 +121,33 @@ namespace
     return max_n + 1;
   }
 
-  std::map<int, int> get_next_indices_for_classes(const std::vector<Zone> &zones)
+  bool write_annotation_json(const std::string &path, const std::string &image_path,
+                             int image_width, int image_height,
+                             const std::vector<Shape> &shapes)
   {
-    std::map<int, int> next_index;
-    for (const auto &z : zones)
+    std::ofstream out(path);
+    if (!out)
+      return false;
+    out << "{\n";
+    out << "  \"imagePath\": \"" << image_path << "\",\n";
+    out << "  \"imageHeight\": " << image_height << ",\n";
+    out << "  \"imageWidth\": " << image_width << ",\n";
+    out << "  \"shapes\": [\n";
+    for (size_t i = 0; i < shapes.size(); ++i)
     {
-      std::string dir_path = std::string(coin::Config::TRAINING_DATA_DIR) + "/" + z.dir_name;
-      next_index[z.class_id] = get_next_index_for_dir(dir_path);
+      const auto &s = shapes[i];
+      out << "    {\n";
+      out << "      \"label\": \"" << s.label << "\",\n";
+      out << "      \"center\": [" << s.center_x << ", " << s.center_y << "],\n";
+      out << "      \"radius\": " << s.radius << "\n";
+      out << "    }";
+      if (i + 1 < shapes.size())
+        out << ",";
+      out << "\n";
     }
-    return next_index;
+    out << "  ]\n";
+    out << "}\n";
+    return true;
   }
 
 }
@@ -138,26 +160,27 @@ int main()
 
   std::cout << "Using px-to-mm ratio: " << RATIO_PX_TO_MM << " mm/px (from SCALE_FACTOR)." << std::endl;
 
-  std::mt19937 rng(static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::vector<Zone> zones = build_randomized_zones(rng);
+  int current_sequence = 0;
+  std::vector<Zone> zones = build_zones_for_sequence(current_sequence);
 
-  ensure_training_dirs(zones);
-  ensure_manifest_header();
+  const std::string base_dir(coin::Config::TRAINING_DATA_DIR);
+  const std::string images_dir = base_dir + "/" + IMAGES_DIR;
+  const std::string labels_dir = base_dir + "/" + LABELS_DIR;
+  ensure_training_dirs(base_dir);
 
   coin::CornerStabilizer stabilizer(coin::Config::STABILIZER_WINDOW);
   coin::CoinTracker tracker;
   cv::Mat dst_corners = (cv::Mat_<float>(4, 2) << 0, 0, WIDTH_PX - 1, 0, WIDTH_PX - 1, HEIGHT_PX - 1, 0, HEIGHT_PX - 1);
 
-  std::map<int, int> class_counts = get_next_indices_for_classes(zones);
+  int next_image_index = get_next_image_index(images_dir);
 
   std::cout << "--- TRAINING DATA ACQUISITION ---\n";
-  std::cout << "Data: " << coin::Config::TRAINING_DATA_DIR << "/ + " << coin::Config::TRAINING_MANIFEST
-            << " (same as train_classifier.py).\n";
-  std::cout << "Zones (randomized this run): left to right = ";
+  std::cout << "Output: " << base_dir << "/ (" << IMAGES_DIR << "/ + " << LABELS_DIR << "/ JSON)\n";
+  std::cout << "6 sequences; change with 's'. Current: sequence " << (current_sequence + 1) << "/6. Zones left to right = ";
   for (size_t i = 0; i < zones.size(); ++i)
     std::cout << zones[i].name << (i + 1 < zones.size() ? " | " : "\n");
-  std::cout << "Align paper. Place coins in zones.\n";
-  std::cout << "  'c' = capture (save coin crops)\n";
+  std::cout << "  's' = next sequence (1-6)\n";
+  std::cout << "  'c' = capture (save full image + annotation JSON)\n";
   std::cout << "  1/2/3/4 = set default classifier for coin_counter (1=SVM 2=KNN 3=RF 4=NB)\n";
   std::cout << "  'q' = quit\n";
 
@@ -198,10 +221,10 @@ int main()
         if (z.limit_x < WIDTH_PX)
           cv::line(debug_warped, cv::Point(z.limit_x, 0), cv::Point(z.limit_x, HEIGHT_PX), cv::Scalar(0, 0, 255), 2);
         int cx_zone = (prev_x + std::min(z.limit_x, WIDTH_PX)) / 2;
-        std::string label = std::string(z.name) + ": " + std::to_string(class_counts[z.class_id]);
-        cv::putText(debug_warped, label, cv::Point(cx_zone - 40, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+        cv::putText(debug_warped, z.name, cv::Point(cx_zone - 40, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 4);
         prev_x = z.limit_x;
       }
+      cv::putText(debug_warped, "Seq " + std::to_string(current_sequence + 1) + "/6", cv::Point(10, HEIGHT_PX - 15), cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(0, 255, 255), 2);
 
       auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM);
       tracker.update(detections);
@@ -209,7 +232,7 @@ int main()
       for (const auto &e : entries)
       {
         int r = coin::diameter_mm_to_radius_px(e.second, RATIO_PX_TO_MM);
-        cv::circle(debug_warped, e.first, r, cv::Scalar(0, 255, 0), 2);
+        cv::circle(debug_warped, e.first, r, cv::Scalar(0, 0, 255), 3);
       }
       cv::Mat small;
       cv::resize(debug_warped, small, cv::Size(), 0.6, 0.6);
@@ -223,6 +246,14 @@ int main()
     int key = cv::waitKey(1);
     if (key == 'q')
       break;
+    if (key == 's')
+    {
+      current_sequence = (current_sequence + 1) % 6;
+      zones = build_zones_for_sequence(current_sequence);
+      std::cout << "Sequence " << (current_sequence + 1) << "/6. Zones: ";
+      for (size_t i = 0; i < zones.size(); ++i)
+        std::cout << zones[i].name << (i + 1 < zones.size() ? " | " : "\n");
+    }
     if (key == '1' || key == '2' || key == '3' || key == '4')
     {
       default_classifier = key - '1';
@@ -236,52 +267,41 @@ int main()
       cv::Mat warped;
       cv::warpPerspective(frame, warped, M, cv::Size(WIDTH_PX, HEIGHT_PX));
       auto detections = coin::detect_and_measure_coins(warped, RATIO_PX_TO_MM);
-      std::vector<std::pair<cv::Point2i, double>> entries;
+
+      std::vector<Shape> shapes;
       for (const auto &d : detections)
-        entries.emplace_back(d.center, d.diameter_mm);
-      int n_captured = 0;
-      for (const auto &e : entries)
       {
-        int label_id = -1;
-        const Zone *zone_ptr = nullptr;
+        int radius_px = coin::diameter_mm_to_radius_px(d.diameter_mm, RATIO_PX_TO_MM);
+        if (radius_px < 5)
+          continue;
+        int class_id = -1;
         for (const auto &z : zones)
         {
-          if (e.first.x < z.limit_x)
+          if (d.center.x < z.limit_x)
           {
-            label_id = z.class_id;
-            zone_ptr = &z;
+            class_id = z.class_id;
             break;
           }
         }
-        if (label_id < 0 || !zone_ptr)
+        if (class_id < 0)
           continue;
-        int radius_px = coin::diameter_mm_to_radius_px(e.second, RATIO_PX_TO_MM);
-        if (radius_px < 5)
-          continue;
-        int pad = std::min(10, radius_px / 2);
-        int side = std::min(2 * (radius_px + pad), std::min(warped.cols, warped.rows));
-        int x0 = std::max(0, e.first.x - side / 2);
-        int y0 = std::max(0, e.first.y - side / 2);
-        if (x0 + side > warped.cols)
-          x0 = warped.cols - side;
-        if (y0 + side > warped.rows)
-          y0 = warped.rows - side;
-        cv::Rect roi(x0, y0, side, side);
-        cv::Mat crop = warped(roi).clone();
-
-        int count = class_counts[label_id];
-        std::string rel_path = std::string(zone_ptr->dir_name) + "/" + std::to_string(count) + ".png";
-        std::string full_path = std::string(coin::Config::TRAINING_DATA_DIR) + "/" + rel_path;
-        if (cv::imwrite(full_path, crop) && append_manifest(rel_path, label_id, e.second))
-        {
-          class_counts[label_id]++;
-          n_captured++;
-        }
+        shapes.push_back({CLASS_LABELS[class_id], d.center.x, d.center.y, radius_px});
       }
-      std::cout << "Saved " << n_captured << " coin images. Total per class: ";
-      for (const auto &z : zones)
-        std::cout << z.name << "=" << class_counts[z.class_id] << " ";
-      std::cout << "\n";
+
+      std::string base_name = std::to_string(next_image_index) + ".png";
+      std::string json_name = std::to_string(next_image_index) + ".json";
+      std::string image_path_full = images_dir + "/" + base_name;
+      std::string json_path_full = labels_dir + "/" + json_name;
+
+      if (cv::imwrite(image_path_full, warped) &&
+          write_annotation_json(json_path_full, base_name, warped.cols, warped.rows, shapes))
+      {
+        std::cout << "Saved " << base_name << " + " << json_name << " (" << shapes.size() << " shapes)\n";
+        next_image_index++;
+      }
+      else
+        std::cerr << "Failed to write image or JSON\n";
+
       cv::Mat drain;
       for (int i = 0; i < 15; ++i)
         cap.read(drain);

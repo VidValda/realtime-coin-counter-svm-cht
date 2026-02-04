@@ -1,14 +1,3 @@
 %YAML:1.0
 ---
-base_ratio: 3.2125374907300647e-01
-distortion_k: 1.4906588945265832e-03
-distortion_p_y: -8.6164263762235037e-03
-distortion_p_x: -9.1188146202594179e-03
-img_center:
-   - 495.
-   - 324.
-max_dist_sq: 350001.
-height_px: 648.
-width_half: 495.
-height_half: 324.
-use_height_px: 1
+ratio_px_to_mm: 1.8311534873182989e-01

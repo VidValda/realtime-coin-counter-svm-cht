@@ -15,7 +15,7 @@ namespace
 
   constexpr double PAPER_WIDTH_MM = 330.0;
   constexpr double PAPER_HEIGHT_MM = 216.0;
-  constexpr double SCALE_FACTOR = 3.0;
+  constexpr double SCALE_FACTOR = 5.16036;
   constexpr int WIDTH_PX = static_cast<int>(PAPER_WIDTH_MM * SCALE_FACTOR);
   constexpr int HEIGHT_PX = static_cast<int>(PAPER_HEIGHT_MM * SCALE_FACTOR);
   constexpr double INITIAL_RATIO = 1.0 / SCALE_FACTOR;
@@ -27,9 +27,47 @@ namespace
     const char *name;
     int class_id;
   };
-  const Zone ZONES[] = {
-      {ZONE_WIDTH * 1, "20 cent", 0}, {ZONE_WIDTH * 2, "10 cent", 1}, {ZONE_WIDTH * 3, "1 Euro", 2}, {ZONE_WIDTH * 4, "1 cent", 3}, {ZONE_WIDTH * 5, "2 cent", 4}, {9999, "5 cent", 5}};
+
+  struct ClassInfo
+  {
+    const char *name;
+    int class_id;
+  };
+
+  const ClassInfo CLASSES[] = {
+      {"20 cent", 0},
+      {"10 cent", 1},
+      {"1 Euro", 2},
+      {"1 cent", 3},
+      {"2 cent", 4},
+      {"5 cent", 5}};
+
   const double GROUND_TRUTH_DIAMETER_MM[] = {22.25, 19.75, 23.25, 16.25, 18.75, 21.25};
+
+  const int SEQUENCES[6][6] = {
+      {0, 1, 2, 3, 4, 5}, /* seq 0: 20c, 10c, 1€, 1c, 2c, 5c */
+      {1, 2, 0, 4, 5, 3}, /* seq 1 */
+      {2, 0, 1, 5, 3, 4}, /* seq 2 */
+      {3, 4, 5, 0, 1, 2}, /* seq 3 */
+      {4, 5, 3, 1, 2, 0}, /* seq 4 */
+      {5, 3, 4, 2, 0, 1}, /* seq 5 */
+  };
+
+  std::vector<Zone> build_zones_for_sequence(int sequence_index)
+  {
+    const int limits[] = {ZONE_WIDTH * 1, ZONE_WIDTH * 2, ZONE_WIDTH * 3, ZONE_WIDTH * 4, ZONE_WIDTH * 5, 9999};
+    sequence_index = sequence_index % 6;
+    if (sequence_index < 0)
+      sequence_index += 6;
+    std::vector<Zone> zones;
+    zones.reserve(6);
+    for (int i = 0; i < 6; ++i)
+    {
+      int class_id = SEQUENCES[sequence_index][i];
+      zones.push_back({limits[i], CLASSES[class_id].name, class_id});
+    }
+    return zones;
+  }
 
 }
 
@@ -43,13 +81,18 @@ int main()
   coin::CoinTracker tracker;
   cv::Mat dst_corners = (cv::Mat_<float>(4, 2) << 0, 0, WIDTH_PX - 1, 0, WIDTH_PX - 1, HEIGHT_PX - 1, 0, HEIGHT_PX - 1);
 
+  int current_sequence = 0;
+  std::vector<Zone> zones = build_zones_for_sequence(current_sequence);
+
   std::vector<double> collected_px_dia, collected_true_mm;
   std::map<int, int> samples_count;
-  for (const auto &z : ZONES)
-    samples_count[z.class_id] = 0;
+  for (int c = 0; c < 6; ++c)
+    samples_count[c] = 0;
 
   std::cout << "--- PX-TO-MM RATIO CALIBRATION ---\n";
-  std::cout << "Place coins in zones. 'c' = Capture, 's' = Solve & Save ratio, 'q' = Quit\n";
+  std::cout << "6 sequences; change with 'z'. Current: sequence " << (current_sequence + 1) << "/6.\n";
+  std::cout << "  'z' = next sequence (1-6)\n";
+  std::cout << "  'c' = Capture, 's' = Solve & Save ratio, 'q' = Quit\n";
 
   while (true)
   {
@@ -80,7 +123,7 @@ int main()
       for (const auto &e : entries)
       {
         int zone_id = -1;
-        for (const auto &z : ZONES)
+        for (const auto &z : zones)
         {
           if (e.first.x < z.limit_x)
           {
@@ -97,7 +140,7 @@ int main()
       }
 
       int prev_x = 0;
-      for (const auto &z : ZONES)
+      for (const auto &z : zones)
       {
         if (z.limit_x < WIDTH_PX)
           cv::line(debug_warped, cv::Point(z.limit_x, 0), cv::Point(z.limit_x, HEIGHT_PX), cv::Scalar(0, 0, 255), 2);
@@ -106,6 +149,8 @@ int main()
         cv::putText(debug_warped, label, cv::Point(cx_zone - 40, 50), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
         prev_x = z.limit_x;
       }
+      cv::putText(debug_warped, "Seq " + std::to_string(current_sequence + 1) + "/6",
+                  cv::Point(10, HEIGHT_PX - 35), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
       cv::putText(debug_warped, "Samples: " + std::to_string(collected_px_dia.size()),
                   cv::Point(10, HEIGHT_PX - 15), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 255), 2);
       cv::Mat small;
@@ -115,12 +160,20 @@ int main()
       int key = cv::waitKey(1);
       if (key == 'q')
         break;
+      if (key == 'z')
+      {
+        current_sequence = (current_sequence + 1) % 6;
+        zones = build_zones_for_sequence(current_sequence);
+        std::cout << "Sequence " << (current_sequence + 1) << "/6. Zones: ";
+        for (size_t i = 0; i < zones.size(); ++i)
+          std::cout << zones[i].name << (i + 1 < zones.size() ? " | " : "\n");
+      }
       if (key == 'c')
       {
         for (const auto &e : entries)
         {
           int zone_id = -1;
-          for (const auto &z : ZONES)
+          for (const auto &z : zones)
           {
             if (e.first.x < z.limit_x)
             {

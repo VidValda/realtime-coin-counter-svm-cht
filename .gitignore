@@ -4,6 +4,8 @@ build/*
 !build/**/*.yaml
 !build/training_data/
 !build/training_data/**
+!build/training_data_2/
+!build/training_data_2/**
 cmake-build-*/
 out/
 

@@ -205,8 +205,8 @@ namespace coin
     cv::Mat segmentation_vis;
     if (out_debug)
     {
-      // Start with light gray background for better visibility
-      segmentation_vis = cv::Mat::ones(frame.rows, frame.cols, CV_8UC3) * cv::Scalar(180, 180, 180);
+      segmentation_vis = cv::Mat(frame.rows, frame.cols, CV_8UC3);
+      segmentation_vis.setTo(cv::Scalar(180, 180, 180));
       // Overlay original frame with transparency
       if (frame.channels() == 3)
         cv::addWeighted(segmentation_vis, 0.5, frame, 0.5, 0, segmentation_vis);
@@ -227,7 +227,6 @@ namespace coin
       for (int lid = 1; lid <= num_labels; ++lid)
         seg_palette[lid] = cv::Vec3b(static_cast<uchar>(u_p(rng_p)), static_cast<uchar>(u_p(rng_p)), static_cast<uchar>(u_p(rng_p)));
     }
-
     for (int label = 2; label <= num_labels; ++label)
     {
       cv::Mat mask = (markers_out == label);

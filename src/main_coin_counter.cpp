@@ -31,7 +31,7 @@ namespace
     cv::namedWindow("Anti-Glare Detection", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Warped", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Debug: Markers", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("Debug: Segmentation", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Debug: Segmentation", cv::WINDOW_AUTOSIZE);
     // cv::namedWindow("Debug: Binary", cv::WINDOW_AUTOSIZE);
     // cv::namedWindow("Debug: Sure FG", cv::WINDOW_AUTOSIZE);
     // cv::namedWindow("Debug: Distance", cv::WINDOW_AUTOSIZE);
@@ -76,10 +76,10 @@ namespace
                            coin::Config::CLUSTER_COLORS_BGR[cid][2]);
         total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
       }
-      cv::circle(display, e.first, r, color, 2);
+      cv::circle(display, e.first, r, color, 4);
       std::string label = std::to_string(static_cast<int>(display_diameter_mm * 10) / 10.0).substr(0, 4) + "mm";
       cv::putText(display, label, cv::Point(e.first.x - 20, e.first.y - 10),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 255), 2);
+                  cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 4);
     }
 
     cv::rectangle(display, cv::Point(10, 10), cv::Point(280, 90), cv::Scalar(0, 0, 0), -1);
@@ -98,7 +98,7 @@ namespace
   bool run_coin_detection(const cv::Mat &warped, double ratio_px_to_mm,
                           coin::CoinTracker &tracker, coin::SVMClassifier &svm, const std::string &classifier_name)
   {
-    const double keep_frac = 0.8;
+    const double keep_frac = 1;
     int cw = static_cast<int>(warped.cols * keep_frac);
     int ch = static_cast<int>(warped.rows * keep_frac);
     int cx = (warped.cols - cw) / 2;
@@ -106,6 +106,7 @@ namespace
     cv::Rect roi(cx, cy, cw, ch);
     cv::Mat warped_crop = warped(roi).clone();
 
+    // coin::DebugViews debug;
     coin::DebugViews debug;
     auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, &debug);
     for (auto &d : detections)
@@ -114,15 +115,15 @@ namespace
     cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name);
     cv::imshow("Anti-Glare Detection", for_display(display));
 
-    if (!debug.markers_vis.empty())
+    if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
       cv::imshow("Debug: Markers", for_display(debug.markers_vis));
-    if (!debug.segmentation.empty())
-      cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
-    // if (!debug.binary.empty())
+    // if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
+    //   cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
+    // if (!debug.binary.empty() && debug.binary.total() > 0)
     //   cv::imshow("Debug: Binary", for_display(debug.binary));
-    // if (!debug.sure_fg.empty())
+    // if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
     //   cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
-    // if (!debug.dist_vis.empty())
+    // if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
     //   cv::imshow("Debug: Distance", for_display(debug.dist_vis));
     return true;
   }
