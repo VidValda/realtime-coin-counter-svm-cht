@@ -17,7 +17,7 @@ import numpy as np
 # Watershed + preprocessing defaults (from tuned GUI)
 DEFAULTS = {
     "CHANNEL_MODE": 2,  # 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B
-    "CLAHE_CLIP": 8,
+    "CLAHE_CLIP": 9,
     "CLAHE_GRID": 1,  # GUI showed 0; grid must be >= 1
     "BLUR_KSIZE": 9,
     "use_adaptive": 0,  # 0=Otsu, 1=Adaptive
