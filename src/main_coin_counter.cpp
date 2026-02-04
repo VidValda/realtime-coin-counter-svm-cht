@@ -29,9 +29,9 @@ namespace
     return 0;
   }
 
-  cv::Mat draw_coins_and_histogram(const cv::Mat &frame, coin::CoinTracker &tracker,
-                                   double ratio_px_to_mm, coin::SVMClassifier &svm, bool show_debug,
-                                   const std::string &classifier_name = "SVM")
+  cv::Mat draw_coins(const cv::Mat &frame, coin::CoinTracker &tracker,
+                     double ratio_px_to_mm, coin::SVMClassifier &svm,
+                     const std::string &classifier_name = "SVM")
   {
     cv::Mat display;
     frame.copyTo(display);
@@ -70,55 +70,11 @@ namespace
     cv::putText(display, "Clf: " + classifier_name + " (1-4)", cv::Point(20, 82),
                 cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 200, 200), 1);
 
-    if (show_debug && !entries.empty())
-    {
-      std::vector<double> diameters;
-      for (const auto &e : entries)
-        diameters.push_back(e.second);
-      double min_d = *std::min_element(diameters.begin(), diameters.end());
-      double max_d = *std::max_element(diameters.begin(), diameters.end());
-      int n_bins = static_cast<int>((coin::Config::HIST_BIN_MAX - coin::Config::HIST_BIN_MIN) / coin::Config::HIST_BIN_STEP);
-      std::vector<int> counts(n_bins, 0);
-      for (double d : diameters)
-      {
-        int bin = static_cast<int>((d - coin::Config::HIST_BIN_MIN) / coin::Config::HIST_BIN_STEP);
-        if (bin >= 0 && bin < n_bins)
-          counts[bin]++;
-      }
-      int max_count = *std::max_element(counts.begin(), counts.end());
-      if (max_count == 0)
-        max_count = 1;
-      cv::Mat hist_img(coin::Config::HIST_HEIGHT, coin::Config::HIST_WIDTH, CV_8UC3, cv::Scalar(255, 255, 255));
-      int bar_w = std::max(1, (coin::Config::HIST_WIDTH - 40) / n_bins - 2);
-      for (int i = 0; i < n_bins; ++i)
-      {
-        int bar_h = static_cast<int>((counts[i] / static_cast<double>(max_count)) * (coin::Config::HIST_HEIGHT - 50));
-        int x1 = 30 + i * (bar_w + 2);
-        int y1 = coin::Config::HIST_HEIGHT - 30 - bar_h;
-        int x2 = x1 + bar_w;
-        int y2 = coin::Config::HIST_HEIGHT - 30;
-        cv::rectangle(hist_img, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(180, 130, 70), -1);
-        cv::rectangle(hist_img, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(50, 50, 50), 1);
-      }
-      cv::putText(hist_img, "Diameter (mm)", cv::Point(coin::Config::HIST_WIDTH / 2 - 50, coin::Config::HIST_HEIGHT - 5),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(0, 0, 0), 1);
-      cv::putText(hist_img, "n=" + std::to_string(diameters.size()), cv::Point(10, 20),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0), 1);
-      cv::imshow("Diameter histogram", hist_img);
-    }
-    else if (show_debug)
-    {
-      cv::Mat hist_img(coin::Config::HIST_HEIGHT, coin::Config::HIST_WIDTH, CV_8UC3, cv::Scalar(255, 255, 255));
-      cv::putText(hist_img, "No diameters", cv::Point(coin::Config::HIST_WIDTH / 2 - 50, coin::Config::HIST_HEIGHT / 2 - 10),
-                  cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(100, 100, 100), 1);
-      cv::imshow("Diameter histogram", hist_img);
-    }
-
     return display;
   }
 
   bool run_coin_detection(const cv::Mat &warped, double ratio_px_to_mm,
-                          coin::CoinTracker &tracker, coin::SVMClassifier &svm, bool show_debug, const std::string &classifier_name)
+                          coin::CoinTracker &tracker, coin::SVMClassifier &svm, const std::string &classifier_name)
   {
     const double keep_frac = 0.8;
     int cw = static_cast<int>(warped.cols * keep_frac);
@@ -132,7 +88,7 @@ namespace
     for (auto &d : detections)
       d.center += cv::Point2i(roi.x, roi.y);
     tracker.update(detections);
-    cv::Mat display = draw_coins_and_histogram(warped, tracker, ratio_px_to_mm, svm, show_debug, classifier_name);
+    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name);
     cv::imshow("Anti-Glare Detection", display);
     // if (show_debug)
     // {
@@ -219,7 +175,7 @@ int main()
           cv::warpPerspective(frame, warped, M, cv::Size(width_px, height_px));
           if (!warped.empty())
           {
-            run_coin_detection(warped, ratio_px_to_mm, tracker, svm, true,
+            run_coin_detection(warped, ratio_px_to_mm, tracker, svm,
                                coin::Config::CLASSIFIER_NAMES[classifier_index]);
             cv::Mat warped_small;
             cv::resize(warped, warped_small, cv::Size(), 0.5, 0.5);

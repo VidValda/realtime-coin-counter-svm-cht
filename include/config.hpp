@@ -30,12 +30,6 @@ namespace coin
     static constexpr double MAX_DIAMETER_DEVIATION_MM = 3.0;
     static constexpr int MIN_SAMPLES_FOR_STABLE = 3;
 
-    static constexpr int HIST_WIDTH = 320;
-    static constexpr int HIST_HEIGHT = 240;
-    static constexpr double HIST_BIN_MIN = 10.0;
-    static constexpr double HIST_BIN_MAX = 41.0;
-    static constexpr double HIST_BIN_STEP = 0.2;
-
     static constexpr const char *CSV_PATH = "coin_data.csv";
     static constexpr int CSV_TARGET_POINTS = 3000;
 
@@ -51,7 +45,7 @@ namespace coin
 
     static constexpr double PAPER_WIDTH_MM = 330.0;
     static constexpr double PAPER_HEIGHT_MM = 216.0;
-    static constexpr double SCALE_FACTOR = 3.0;
+    static constexpr double SCALE_FACTOR = 5;
 
     static constexpr int PAPER_LINE_MIN_LENGTH = 100;
     static constexpr int PAPER_MORPH_KERNEL = 3;
