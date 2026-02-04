@@ -6,7 +6,7 @@ import cv2
 
 REPO_ROOT = Path(__file__).resolve().parent
 OUT_DIR = REPO_ROOT / "build"
-TRAINING_BASE = OUT_DIR / "training_data"
+TRAINING_BASE = OUT_DIR / "training_data_2"
 MANIFEST_PATH = TRAINING_BASE / "manifest.csv"
 
 CLASSIFIER_MODEL_NAMES = ["coin_svm.yaml", "coin_knn.yaml", "coin_rtrees.yaml", "coin_nb.yaml"]
