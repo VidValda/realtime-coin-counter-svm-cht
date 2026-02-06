@@ -54,8 +54,12 @@ namespace coin
     static constexpr const char *SVM_SCALER_PATH = "coin_scaler.yaml";
     static constexpr const char *CLASSIFIER_MODEL_PATHS[4] = {
         "coin_svm.yaml", "coin_knn.yaml", "coin_rtrees.yaml", "coin_nb.yaml"};
-    static constexpr const char *CLASSIFIER_NAMES[4] = {"SVM", "KNN", "RandomForest", "NaiveBayes"};
+    static constexpr const char *CLASSIFIER_NAMES[6] = {"SVM", "KNN", "RandomForest", "NaiveBayes", "CNN", "ResNet18"};
     static constexpr const char *CLASSIFIER_DEFAULT_FILE = "classifier_default.txt";
+    /** TorchScript models (export with export_torchscript.py from coin_cnn.pt / coin_resnet18.pt). */
+    static constexpr const char *COIN_CNN_TRACED_PATH = "coin_cnn_traced.pt";
+    static constexpr const char *COIN_RESNET18_TRACED_PATH = "coin_resnet18_traced.pt";
+    static constexpr int COIN_CROP_SIZE = 150;
     static constexpr const char *TRAINING_DATA_DIR = "training_data_2";
     static constexpr const char *TRAINING_MANIFEST = "training_data_2/manifest.csv";
 
