@@ -79,6 +79,7 @@ namespace coin
   {
     if (!module_)
       return 0;
+    torch::NoGradGuard no_grad;
     cv::Mat crop = Impl::extract_crop(frame_bgr, center.x, center.y);
     torch::Tensor input = Impl::mat_to_tensor(crop);
     std::vector<torch::jit::IValue> inputs;
@@ -86,6 +87,32 @@ namespace coin
     torch::Tensor output = module_->module.forward(inputs).toTensor();
     torch::Tensor pred = output.argmax(1);
     return pred.item<int>();
+  }
+
+  std::vector<int> TorchClassifier::predict_batch(const cv::Mat &frame_bgr,
+                                                   const std::vector<std::pair<cv::Point2i, int>> &centers_radii) const
+  {
+    std::vector<int> out;
+    if (!module_ || centers_radii.empty())
+      return out;
+    out.resize(centers_radii.size());
+    torch::NoGradGuard no_grad;
+    std::vector<torch::Tensor> tensors;
+    tensors.reserve(centers_radii.size());
+    for (const auto &cr : centers_radii)
+    {
+      cv::Mat crop = Impl::extract_crop(frame_bgr, cr.first.x, cr.first.y);
+      tensors.push_back(Impl::mat_to_tensor(crop));
+    }
+    torch::Tensor batch = torch::stack(tensors, 0);
+    std::vector<torch::jit::IValue> inputs;
+    inputs.push_back(batch);
+    torch::Tensor output = module_->module.forward(inputs).toTensor();
+    torch::Tensor pred = output.argmax(1);
+    auto accessor = pred.accessor<int64_t, 1>();
+    for (size_t i = 0; i < centers_radii.size(); ++i)
+      out[i] = static_cast<int>(accessor[i]);
+    return out;
   }
 
 }

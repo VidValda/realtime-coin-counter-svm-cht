@@ -2,6 +2,7 @@
 #include "config.hpp"
 #include "calibration.hpp"
 #include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
 #include <cmath>
 #include <algorithm>
 #include <random>
@@ -34,12 +35,12 @@ namespace coin
     return ch;
   }
 
-  /** Preprocess for watershed: channel -> CLAHE -> median blur */
+  /** Preprocess for watershed: channel -> CLAHE -> median blur. CLAHE is cached to avoid alloc per frame. */
   static cv::Mat preprocess_for_watershed(const cv::Mat &frame)
   {
     cv::Mat ch = get_channel(frame, Config::CHANNEL_MODE);
     cv::Mat enhanced;
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(
+    static cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(
         static_cast<double>(std::max(1, Config::CLAHE_CLIP)),
         cv::Size(std::max(1, Config::CLAHE_GRID), std::max(1, Config::CLAHE_GRID)));
     clahe->apply(ch, enhanced);
@@ -53,8 +54,10 @@ namespace coin
   {
     cv::Mat ch = get_channel(frame, Config::CHANNEL_MODE);
     cv::Mat enhanced, blurred;
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(Config::CLAHE_CLIP, cv::Size(Config::CLAHE_GRID, Config::CLAHE_GRID));
-    clahe->apply(ch, enhanced);
+    static cv::Ptr<cv::CLAHE> clahe_circles = cv::createCLAHE(
+        static_cast<double>(Config::CLAHE_CLIP),
+        cv::Size(std::max(1, Config::CLAHE_GRID), std::max(1, Config::CLAHE_GRID)));
+    clahe_circles->apply(ch, enhanced);
     cv::medianBlur(enhanced, blurred, ensure_odd(Config::BLUR_KSIZE));
     return blurred;
   }
@@ -103,8 +106,12 @@ namespace coin
   }
 
   Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm,
-                                      DebugViews *out_debug)
+                                      DebugViews *out_debug, double pixel_scale)
   {
+    if (pixel_scale <= 0)
+      pixel_scale = 1.0;
+    const double min_contour_area = Config::MIN_CONTOUR_AREA * pixel_scale * pixel_scale;
+
     cv::Mat blurred = preprocess_for_watershed(frame);
 
     // 1. Threshold: Otsu or Adaptive
@@ -182,15 +189,16 @@ namespace coin
     markers.setTo(0, unknown);
 
     // Marker visualization (color by label)
-    if (out_debug && !markers.empty())
+    if (!markers.empty())
     {
-      out_debug->markers_vis = cv::Mat::zeros(markers.rows, markers.cols, CV_8UC3);
+      cv::Mat markers_vis = cv::Mat::zeros(markers.rows, markers.cols, CV_8UC3);
       std::mt19937 rng(42);
       std::uniform_int_distribution<int> u(150, 255);
       for (int lid = 1; lid <= num_labels; ++lid)
       {
         cv::Vec3b c(static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)));
-        out_debug->markers_vis.setTo(c, markers == lid);
+        markers_vis.setTo(c, markers == lid);
+        cv::imshow("Debug: Markers", markers_vis);
       }
     }
 
@@ -239,7 +247,7 @@ namespace coin
                                           [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b)
                                           { return cv::contourArea(a) < cv::contourArea(b); });
       double area = cv::contourArea(cnt);
-      if (area < Config::MIN_CONTOUR_AREA)
+      if (area < min_contour_area)
         continue;
       double perimeter = cv::arcLength(cnt, true);
       if (perimeter <= 0)
@@ -296,10 +304,20 @@ namespace coin
 
   std::optional<cv::Mat> find_paper_corners(const cv::Mat &frame)
   {
-    cv::Mat gray, gray_blurred, gray_filtered;
-    cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-    cv::GaussianBlur(gray, gray_blurred, cv::Size(7, 7), 0);
-    cv::medianBlur(gray_blurred, gray_filtered, 7);
+    const int max_w = Config::PAPER_DETECT_MAX_WIDTH;
+    double scale = 1.0;
+    cv::Mat work = frame;
+    if (max_w > 0 && frame.cols > max_w)
+    {
+      scale = static_cast<double>(max_w) / frame.cols;
+      cv::resize(frame, work, cv::Size(), scale, scale, cv::INTER_LINEAR);
+    }
+    const int min_area_scaled = static_cast<int>(Config::PAPER_MIN_AREA * scale * scale);
+    const int line_min = static_cast<int>(Config::PAPER_LINE_MIN_LENGTH * scale);
+
+    cv::Mat gray, gray_filtered;
+    cv::cvtColor(work, gray, cv::COLOR_BGR2GRAY);
+    cv::GaussianBlur(gray, gray_filtered, cv::Size(5, 5), 0);
     cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(0);
     std::vector<cv::Vec4f> lines;
     lsd->detect(gray_filtered, lines);
@@ -307,9 +325,9 @@ namespace coin
     for (const auto &line : lines)
     {
       double dx = line[2] - line[0], dy = line[3] - line[1];
-      if (std::hypot(dx, dy) > Config::PAPER_LINE_MIN_LENGTH)
+      if (std::hypot(dx, dy) > line_min)
       {
-        cv::line(line_mask, cv::Point(line[0], line[1]), cv::Point(line[2], line[3]), 255, 3);
+        cv::line(line_mask, cv::Point(line[0], line[1]), cv::Point(line[2], line[3]), 255, 2);
       }
     }
     int k = std::max(1, Config::PAPER_MORPH_KERNEL | 1);
@@ -330,13 +348,14 @@ namespace coin
       double peri = cv::arcLength(cnt, true);
       std::vector<cv::Point> approx;
       cv::approxPolyDP(cnt, approx, Config::PAPER_APPROX_EPS_FACTOR * peri, true);
-      if (approx.size() == 4 && cv::contourArea(approx) > Config::PAPER_MIN_AREA)
+      if (approx.size() == 4 && cv::contourArea(approx) > min_area_scaled)
       {
         cv::Mat corners(4, 2, CV_32F);
+        const double inv_scale = 1.0 / scale;
         for (int j = 0; j < 4; ++j)
         {
-          corners.at<float>(j, 0) = static_cast<float>(approx[j].x);
-          corners.at<float>(j, 1) = static_cast<float>(approx[j].y);
+          corners.at<float>(j, 0) = static_cast<float>(approx[j].x * inv_scale);
+          corners.at<float>(j, 1) = static_cast<float>(approx[j].y * inv_scale);
         }
         return corners;
       }

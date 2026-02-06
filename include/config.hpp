@@ -71,10 +71,17 @@ namespace coin
     static constexpr int PAPER_MORPH_KERNEL = 3;
     static constexpr double PAPER_APPROX_EPS_FACTOR = 0.02;
     static constexpr int PAPER_MIN_AREA = 10000;
+    /** Run find_paper_corners on frame scaled to this max width (0 = full res). Speeds up LSD. */
+    static constexpr int PAPER_DETECT_MAX_WIDTH = 640;
     static constexpr int STABILIZER_WINDOW = 10;
+    /** Run coin detection at this scale (0.5 = half res). Detection results scaled back. */
+    static constexpr double COIN_DETECT_SCALE = 1;
 
     /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
     static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
+
+    /** If true, fill and show debug windows (Markers, Segmentation, Binary, Sure FG, Distance). Slower. */
+    static constexpr bool SHOW_DEBUG_VIEWS = true;
 
     static constexpr int CLUSTER_COLORS_BGR[6][3] = {
         {180, 119, 31}, {14, 127, 255}, {44, 160, 44}, {40, 39, 214}, {189, 103, 148}, {75, 86, 140}};

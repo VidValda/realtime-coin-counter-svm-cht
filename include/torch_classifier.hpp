@@ -5,6 +5,7 @@
 #include <opencv2/core.hpp>
 #include <string>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace coin
@@ -27,6 +28,13 @@ namespace coin
      * preprocess (BGR->RGB, ImageNet normalize), run model, return argmax.
      */
     int predict(const cv::Mat &frame_bgr, cv::Point2i center, int radius_px) const;
+
+    /**
+     * Batch prediction: one forward pass for all coins. centers_radii[i] = (center, radius_px).
+     * Returns class index [0..5] per coin. Much faster than calling predict() in a loop.
+     */
+    std::vector<int> predict_batch(const cv::Mat &frame_bgr,
+                                   const std::vector<std::pair<cv::Point2i, int>> &centers_radii) const;
 
   private:
     struct Impl;

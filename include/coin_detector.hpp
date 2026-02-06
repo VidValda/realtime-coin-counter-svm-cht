@@ -26,9 +26,10 @@ namespace coin
     std::optional<Detection> measure_circle_diameter(const cv::Mat &frame_gray,
                                                      int x, int y, int r, double ratio_px_to_mm);
 
-    /** Watershed-based coin detection. If out_debug is non-null, fills marker and segmentation views. */
+    /** Watershed-based coin detection. If out_debug is non-null, fills marker and segmentation views.
+     * pixel_scale: when running on a downscaled image (e.g. 0.5), pass that scale so MIN_CONTOUR_AREA is adjusted. */
     Detections detect_and_measure_coins(const cv::Mat &frame, double ratio_px_to_mm,
-                                        DebugViews *out_debug = nullptr);
+                                        DebugViews *out_debug = nullptr, double pixel_scale = 1.0);
 
     std::optional<cv::Mat> find_paper_corners(const cv::Mat &frame);
 

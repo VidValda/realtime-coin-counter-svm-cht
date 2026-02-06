@@ -30,14 +30,15 @@ namespace
 
   void create_all_windows_once()
   {
-    //cv::namedWindow("Scanner", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Anti-Glare Detection", cv::WINDOW_AUTOSIZE);
-    //cv::namedWindow("Warped", cv::WINDOW_AUTOSIZE);
-    //cv::namedWindow("Debug: Markers", cv::WINDOW_AUTOSIZE);
-    // cv::namedWindow("Debug: Segmentation", cv::WINDOW_AUTOSIZE);
-    // cv::namedWindow("Debug: Binary", cv::WINDOW_AUTOSIZE);
-    // cv::namedWindow("Debug: Sure FG", cv::WINDOW_AUTOSIZE);
-    // cv::namedWindow("Debug: Distance", cv::WINDOW_AUTOSIZE);
+    if (coin::Config::SHOW_DEBUG_VIEWS)
+    {
+      cv::namedWindow("Debug: Markers", cv::WINDOW_AUTOSIZE);
+      cv::namedWindow("Debug: Segmentation", cv::WINDOW_AUTOSIZE);
+      cv::namedWindow("Debug: Binary", cv::WINDOW_AUTOSIZE);
+      cv::namedWindow("Debug: Sure FG", cv::WINDOW_AUTOSIZE);
+      cv::namedWindow("Debug: Distance", cv::WINDOW_AUTOSIZE);
+    }
   }
 
   double get_ratio_px_to_mm()
@@ -82,6 +83,18 @@ namespace
     bool use_torch = false;
 #endif
 
+    std::vector<int> torch_cids;
+#ifdef COIN_USE_TORCH
+    if (use_torch && !entries.empty())
+    {
+      std::vector<std::pair<cv::Point2i, int>> centers_radii;
+      centers_radii.reserve(entries.size());
+      for (const auto &e : entries)
+        centers_radii.emplace_back(e.first, coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm));
+      torch_cids = torch_clf->predict_batch(frame, centers_radii);
+    }
+#endif
+
     for (size_t i = 0; i < entries.size(); ++i)
     {
       const auto &e = entries[i];
@@ -92,8 +105,7 @@ namespace
       if (use_torch)
       {
 #ifdef COIN_USE_TORCH
-        cid = torch_clf->predict(frame, e.first, r);
-        cid = cid % 6;
+        cid = (i < torch_cids.size()) ? (torch_cids[i] % 6) : 0;
         color = cv::Scalar(coin::Config::CLUSTER_COLORS_BGR[cid][0],
                            coin::Config::CLUSTER_COLORS_BGR[cid][1],
                            coin::Config::CLUSTER_COLORS_BGR[cid][2]);
@@ -149,9 +161,28 @@ namespace
     cv::Rect roi(cx, cy, cw, ch);
     cv::Mat warped_crop = warped(roi).clone();
 
-    // coin::DebugViews debug;
+    const bool show_debug = coin::Config::SHOW_DEBUG_VIEWS;
     coin::DebugViews debug;
-    auto detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, &debug);
+    coin::DebugViews *out_debug = show_debug ? &debug : nullptr;
+    const double det_scale = coin::Config::COIN_DETECT_SCALE;
+    std::vector<coin::Detection> detections;
+    if (det_scale <= 0 || det_scale >= 1.0)
+    {
+      detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, out_debug);
+    }
+    else
+    {
+      cv::Mat small;
+      cv::resize(warped_crop, small, cv::Size(), det_scale, det_scale, cv::INTER_LINEAR);
+      double ratio_small = ratio_px_to_mm / det_scale;
+      detections = coin::detect_and_measure_coins(small, ratio_small, out_debug, det_scale);
+      const double inv = 1.0 / det_scale;
+      for (auto &d : detections)
+      {
+        d.center.x = static_cast<int>(std::round(d.center.x * inv));
+        d.center.y = static_cast<int>(std::round(d.center.y * inv));
+      }
+    }
     for (auto &d : detections)
       d.center += cv::Point2i(roi.x, roi.y);
     tracker.update(detections);
@@ -166,20 +197,23 @@ namespace
       double fps = cv::getTickFrequency() / std::max(ticks - prev_ticks, int64_t(1));
       prev_ticks = ticks;
       cv::putText(display, "FPS: " + std::to_string(static_cast<int>(std::round(fps))),
-                  cv::Point(display.cols - 100, 30), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 255, 0), 2);
+                  cv::Point(display.cols - 200, 30), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 255, 0), 2);
     }
     cv::imshow("Anti-Glare Detection", for_display(display));
 
-    //if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
-    //  cv::imshow("Debug: Markers", for_display(debug.markers_vis));
-    // if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
-    //   cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
-    // if (!debug.binary.empty() && debug.binary.total() > 0)
-    //   cv::imshow("Debug: Binary", for_display(debug.binary));
-    // if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
-    //   cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
-    // if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
-    //   cv::imshow("Debug: Distance", for_display(debug.dist_vis));
+    if (show_debug)
+    {
+      if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
+        cv::imshow("Debug: Markers", for_display(debug.markers_vis));
+      if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
+        cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
+      if (!debug.binary.empty() && debug.binary.total() > 0)
+        cv::imshow("Debug: Binary", for_display(debug.binary));
+      if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
+        cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
+      if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
+        cv::imshow("Debug: Distance", for_display(debug.dist_vis));
+    }
     return true;
   }
 
