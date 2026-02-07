@@ -223,14 +223,40 @@ int main()
 {
   cv::setUseOptimized(true);
 
-  cv::VideoCapture cap(2, cv::CAP_V4L2);
-  if (!cap.isOpened())
+  const char *test_videos_init[] = {coin::Config::TEST_VIDEO_1, coin::Config::TEST_VIDEO_2};
+  const int num_test_videos_init = sizeof(test_videos_init) / sizeof(test_videos_init[0]);
+  int first_video_index = 0;
+
+  cv::VideoCapture cap;
+  if (coin::Config::USE_TEST_VIDEOS)
   {
-    std::cerr << "Could not open camera (index 2). Check device or try another index.\n";
-    return 1;
+    for (; first_video_index < num_test_videos_init; ++first_video_index)
+    {
+      cap.open(test_videos_init[first_video_index]);
+      if (cap.isOpened())
+      {
+        std::cout << "Using test video: " << test_videos_init[first_video_index] << "\n";
+        break;
+      }
+    }
+    if (!cap.isOpened())
+    {
+      std::cerr << "Could not open test videos (tried " << coin::Config::TEST_VIDEO_1
+                << ", " << coin::Config::TEST_VIDEO_2 << ").\n";
+      return 1;
+    }
   }
-  cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
-  cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+  else
+  {
+    cap.open(2, cv::CAP_V4L2);
+    if (!cap.isOpened())
+    {
+      std::cerr << "Could not open camera (index 2). Check device or try another index.\n";
+      return 1;
+    }
+    cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+    cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+  }
 
   create_all_windows_once();
 
@@ -307,12 +333,27 @@ int main()
   int frame_count = 0;
   std::optional<cv::Mat> last_raw_corners;
 
+  const char *test_videos[] = {coin::Config::TEST_VIDEO_1, coin::Config::TEST_VIDEO_2};
+  const int num_test_videos = sizeof(test_videos) / sizeof(test_videos[0]);
+  int current_video_index = coin::Config::USE_TEST_VIDEOS ? first_video_index : -1;
+
   while (true)
   {
     cv::Mat frame;
     if (!cap.read(frame))
     {
-      std::cerr << "Camera read failed (disconnected or EOF).\n";
+      if (coin::Config::USE_TEST_VIDEOS && current_video_index >= 0 && current_video_index + 1 < num_test_videos)
+      {
+        cap.release();
+        ++current_video_index;
+        cap.open(test_videos[current_video_index]);
+        if (cap.isOpened())
+        {
+          std::cout << "Next test video: " << test_videos[current_video_index] << "\n";
+          continue;
+        }
+      }
+      std::cerr << "Camera/video read failed (disconnected or EOF).\n";
       break;
     }
     if (frame.empty())

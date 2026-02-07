@@ -63,6 +63,12 @@ namespace coin
     static constexpr const char *TRAINING_DATA_DIR = "training_data_2";
     static constexpr const char *TRAINING_MANIFEST = "training_data_2/manifest.csv";
 
+    /** Test videos for coin counter (used when USE_TEST_VIDEOS is true). */
+    static constexpr const char *TEST_VIDEO_1 = "test1.mp4";
+    static constexpr const char *TEST_VIDEO_2 = "test2.mp4";
+    /** If true, read from test videos instead of camera. */
+    static constexpr bool USE_TEST_VIDEOS = false;
+
     static constexpr double PAPER_WIDTH_MM = 330.0;
     static constexpr double PAPER_HEIGHT_MM = 216.0;
     static constexpr double SCALE_FACTOR = 5.46104;
@@ -78,7 +84,7 @@ namespace coin
     static constexpr double COIN_DETECT_SCALE = 1;
 
     /** Run find_paper_corners every this many frames (1 = every frame). Higher values reduce CPU when paper is stable. */
-    static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 5;
+    static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 50;
 
     /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
     static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
