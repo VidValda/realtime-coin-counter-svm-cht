@@ -84,11 +84,11 @@ namespace coin
         static constexpr double COIN_DETECT_SCALE = 1;
 
         /** Run find_paper_corners every this many frames (1 = every frame). Higher values reduce CPU when paper is stable. */
-        static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 100;
+        static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 50;
 
         /** Run coin detection (watershed) every this many frames (1 = every frame). Between detections the tracker
          *  state is reused and only the drawing/classification step runs. 3-5 is a good trade-off. */
-        static constexpr int COIN_DETECT_EVERY_N_FRAMES = 3;
+        static constexpr int COIN_DETECT_EVERY_N_FRAMES = 5;
 
         /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
         static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
