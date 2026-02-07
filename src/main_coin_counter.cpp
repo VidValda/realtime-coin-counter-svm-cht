@@ -24,7 +24,7 @@ namespace
       return mat;
     double scale = static_cast<double>(coin::Config::MAX_DISPLAY_WIDTH_PX) / mat.cols;
     cv::Mat out;
-    cv::resize(mat, out, cv::Size(), scale, scale, cv::INTER_LINEAR);
+    cv::resize(mat, out, cv::Size(), scale, scale, cv::INTER_AREA);
     return out;
   }
 
@@ -61,21 +61,30 @@ namespace
     return 0;
   }
 
+  /** Cached classification results to avoid re-classifying on skip frames. */
+  struct ClassificationCache
+  {
+    std::vector<int> class_ids;
+    double total_eur = 0.0;
+    size_t num_entries = 0;
+    bool valid = false;
+  };
+  static ClassificationCache s_clf_cache;
+
   cv::Mat draw_coins(const cv::Mat &frame, coin::CoinTracker &tracker,
                      double ratio_px_to_mm, coin::SVMClassifier &svm,
                      const std::string &classifier_name,
 #ifdef COIN_USE_TORCH
-                     int classifier_index, coin::TorchClassifier *torch_clf)
+                     int classifier_index, coin::TorchClassifier *torch_clf,
 #else
-                     int /* classifier_index */, void *torch_clf)
+                     int /* classifier_index */, void *torch_clf,
 #endif
+                     bool reclassify)
   {
     (void)torch_clf;
     cv::Mat display;
     frame.copyTo(display);
     auto entries = tracker.get_stable_entries();
-    auto rows = coin::collect_coin_features(frame, entries, ratio_px_to_mm);
-    double total_eur = 0.0;
 
 #ifdef COIN_USE_TORCH
     bool use_torch = (classifier_index >= 4 && torch_clf && torch_clf->is_loaded());
@@ -83,46 +92,60 @@ namespace
     bool use_torch = false;
 #endif
 
-    std::vector<int> torch_cids;
-#ifdef COIN_USE_TORCH
-    if (use_torch && !entries.empty())
+    if (reclassify || !s_clf_cache.valid || s_clf_cache.num_entries != entries.size())
     {
-      std::vector<std::pair<cv::Point2i, int>> centers_radii;
-      centers_radii.reserve(entries.size());
-      for (const auto &e : entries)
-        centers_radii.emplace_back(e.first, coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm));
-      torch_cids = torch_clf->predict_batch(frame, centers_radii);
-    }
+      s_clf_cache.class_ids.resize(entries.size(), 0);
+      s_clf_cache.total_eur = 0.0;
+      s_clf_cache.num_entries = entries.size();
+
+#ifdef COIN_USE_TORCH
+      std::vector<int> torch_cids;
+      if (use_torch && !entries.empty())
+      {
+        std::vector<std::pair<cv::Point2i, int>> centers_radii;
+        centers_radii.reserve(entries.size());
+        for (const auto &e : entries)
+          centers_radii.emplace_back(e.first, coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm));
+        torch_cids = torch_clf->predict_batch(frame, centers_radii);
+      }
 #endif
+
+      if (!use_torch)
+      {
+        auto rows = coin::collect_coin_features(frame, entries, ratio_px_to_mm);
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+          int cid = 0;
+          if (i < rows.size())
+            cid = svm.predict(rows[i].diameter_mm, rows[i].L, rows[i].a, rows[i].b) % 6;
+          s_clf_cache.class_ids[i] = cid;
+          s_clf_cache.total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
+        }
+      }
+      else
+      {
+#ifdef COIN_USE_TORCH
+        for (size_t i = 0; i < entries.size(); ++i)
+        {
+          int cid = (i < torch_cids.size()) ? (torch_cids[i] % 6) : 0;
+          s_clf_cache.class_ids[i] = cid;
+          s_clf_cache.total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
+        }
+#endif
+      }
+      s_clf_cache.valid = true;
+    }
 
     for (size_t i = 0; i < entries.size(); ++i)
     {
       const auto &e = entries[i];
       int r = coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm);
-      double display_diameter_mm = e.second;
-      cv::Scalar color(0, 255, 0);
-      int cid = 0;
-      if (use_torch)
-      {
-#ifdef COIN_USE_TORCH
-        cid = (i < torch_cids.size()) ? (torch_cids[i] % 6) : 0;
-        color = cv::Scalar(coin::Config::CLUSTER_COLORS_BGR[cid][0],
-                           coin::Config::CLUSTER_COLORS_BGR[cid][1],
-                           coin::Config::CLUSTER_COLORS_BGR[cid][2]);
-        total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
-#endif
-      }
-      else if (i < rows.size())
-      {
-        cid = svm.predict(rows[i].diameter_mm, rows[i].L, rows[i].a, rows[i].b);
-        cid = cid % 6;
-        color = cv::Scalar(coin::Config::CLUSTER_COLORS_BGR[cid][0],
-                           coin::Config::CLUSTER_COLORS_BGR[cid][1],
-                           coin::Config::CLUSTER_COLORS_BGR[cid][2]);
-        total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
-      }
+      int cid = (i < s_clf_cache.class_ids.size()) ? s_clf_cache.class_ids[i] : 0;
+      cv::Scalar color(coin::Config::CLUSTER_COLORS_BGR[cid][0],
+                       coin::Config::CLUSTER_COLORS_BGR[cid][1],
+                       coin::Config::CLUSTER_COLORS_BGR[cid][2]);
       cv::circle(display, e.first, r, color, 4);
-      std::string label = std::to_string(static_cast<int>(display_diameter_mm * 10) / 10.0).substr(0, 4) + "mm";
+      std::string label = std::to_string(static_cast<int>(e.second * 10) / 10.0).substr(0, 4) + "mm";
       cv::putText(display, label, cv::Point(e.first.x - 20, e.first.y - 10),
                   cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 4);
     }
@@ -132,7 +155,7 @@ namespace
     cv::putText(display, "Coins: " + std::to_string(entries.size()), cv::Point(20, 40),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(2) << "Total: " << total_eur << " EUR";
+    oss << std::fixed << std::setprecision(2) << "Total: " << s_clf_cache.total_eur << " EUR";
     cv::putText(display, oss.str(), cv::Point(20, 62), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
 #ifdef COIN_USE_TORCH
     cv::putText(display, "Clf: " + classifier_name + " (1-6)", cv::Point(20, 82),
@@ -148,48 +171,57 @@ namespace
   bool run_coin_detection(const cv::Mat &warped, double ratio_px_to_mm,
                           coin::CoinTracker &tracker, coin::SVMClassifier &svm, const std::string &classifier_name,
 #ifdef COIN_USE_TORCH
-                          int classifier_index, coin::TorchClassifier *torch_clf)
+                          int classifier_index, coin::TorchClassifier *torch_clf,
 #else
-                          int /* classifier_index */, void * /* torch_clf */)
+                          int /* classifier_index */, void * /* torch_clf */,
 #endif
+                          bool skip_detection = false)
   {
-    const double keep_frac = 1;
-    int cw = static_cast<int>(warped.cols * keep_frac);
-    int ch = static_cast<int>(warped.rows * keep_frac);
-    int cx = (warped.cols - cw) / 2;
-    int cy = (warped.rows - ch) / 2;
-    cv::Rect roi(cx, cy, cw, ch);
-    cv::Mat warped_crop = warped(roi).clone();
-
-    const bool show_debug = coin::Config::SHOW_DEBUG_VIEWS;
-    coin::DebugViews debug;
-    coin::DebugViews *out_debug = show_debug ? &debug : nullptr;
-    const double det_scale = coin::Config::COIN_DETECT_SCALE;
-    std::vector<coin::Detection> detections;
-    if (det_scale <= 0 || det_scale >= 1.0)
+    if (!skip_detection)
     {
-      detections = coin::detect_and_measure_coins(warped_crop, ratio_px_to_mm, out_debug);
-    }
-    else
-    {
-      cv::Mat small;
-      cv::resize(warped_crop, small, cv::Size(), det_scale, det_scale, cv::INTER_LINEAR);
-      double ratio_small = ratio_px_to_mm / det_scale;
-      detections = coin::detect_and_measure_coins(small, ratio_small, out_debug, det_scale);
-      const double inv = 1.0 / det_scale;
-      for (auto &d : detections)
+      const double det_scale = coin::Config::COIN_DETECT_SCALE;
+      const bool show_debug = coin::Config::SHOW_DEBUG_VIEWS;
+      coin::DebugViews debug;
+      coin::DebugViews *out_debug = show_debug ? &debug : nullptr;
+      std::vector<coin::Detection> detections;
+      if (det_scale <= 0 || det_scale >= 1.0)
       {
-        d.center.x = static_cast<int>(std::round(d.center.x * inv));
-        d.center.y = static_cast<int>(std::round(d.center.y * inv));
+        detections = coin::detect_and_measure_coins(warped, ratio_px_to_mm, out_debug);
+      }
+      else
+      {
+        cv::Mat small;
+        cv::resize(warped, small, cv::Size(), det_scale, det_scale, cv::INTER_LINEAR);
+        double ratio_small = ratio_px_to_mm / det_scale;
+        detections = coin::detect_and_measure_coins(small, ratio_small, out_debug, det_scale);
+        const double inv = 1.0 / det_scale;
+        for (auto &d : detections)
+        {
+          d.center.x = static_cast<int>(std::round(d.center.x * inv));
+          d.center.y = static_cast<int>(std::round(d.center.y * inv));
+        }
+      }
+      tracker.update(detections);
+
+      if (show_debug)
+      {
+        if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
+          cv::imshow("Debug: Markers", for_display(debug.markers_vis));
+        if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
+          cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
+        if (!debug.binary.empty() && debug.binary.total() > 0)
+          cv::imshow("Debug: Binary", for_display(debug.binary));
+        if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
+          cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
+        if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
+          cv::imshow("Debug: Distance", for_display(debug.dist_vis));
       }
     }
-    for (auto &d : detections)
-      d.center += cv::Point2i(roi.x, roi.y);
-    tracker.update(detections);
+
 #ifdef COIN_USE_TORCH
-    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name, classifier_index, torch_clf);
+    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name, classifier_index, torch_clf, !skip_detection);
 #else
-    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name, 0, nullptr);
+    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, svm, classifier_name, 0, nullptr, !skip_detection);
 #endif
     {
       static int64_t prev_ticks = cv::getTickCount();
@@ -200,20 +232,6 @@ namespace
                   cv::Point(display.cols - 200, 30), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(0, 255, 0), 2);
     }
     cv::imshow("Anti-Glare Detection", for_display(display));
-
-    if (show_debug)
-    {
-      if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
-        cv::imshow("Debug: Markers", for_display(debug.markers_vis));
-      if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
-        cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
-      if (!debug.binary.empty() && debug.binary.total() > 0)
-        cv::imshow("Debug: Binary", for_display(debug.binary));
-      if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
-        cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
-      if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
-        cv::imshow("Debug: Distance", for_display(debug.dist_vis));
-    }
     return true;
   }
 
@@ -331,7 +349,10 @@ int main()
 #endif
 
   int frame_count = 0;
+  int coin_detect_count = 0;
   std::optional<cv::Mat> last_raw_corners;
+  cv::Mat warped(height_px, width_px, CV_8UC3);
+  cv::Mat cached_M;
 
   const char *test_videos[] = {coin::Config::TEST_VIDEO_1, coin::Config::TEST_VIDEO_2};
   const int num_test_videos = sizeof(test_videos) / sizeof(test_videos[0]);
@@ -384,26 +405,28 @@ int main()
           stable_corners->rows == 4 && stable_corners->cols >= 2)
       {
         cv::Mat rect = coin::order_corners(*stable_corners);
-        cv::Mat M = cv::getPerspectiveTransform(rect, dst_corners);
-        double det = cv::determinant(M);
+        cached_M = cv::getPerspectiveTransform(rect, dst_corners);
+      }
+
+      if (!cached_M.empty())
+      {
+        double det = cv::determinant(cached_M);
         if (std::abs(det) > 1e-6)
         {
-          cv::Mat warped;
-          cv::warpPerspective(frame, warped, M, cv::Size(width_px, height_px));
+          cv::warpPerspective(frame, warped, cached_M, cv::Size(width_px, height_px));
           if (!warped.empty() && warped.rows > 0 && warped.cols > 0)
           {
+            const int coin_every_n = std::max(1, coin::Config::COIN_DETECT_EVERY_N_FRAMES);
+            bool do_detect = (coin_every_n <= 1 || (++coin_detect_count % coin_every_n) == 1);
 #ifdef COIN_USE_TORCH
             run_coin_detection(warped, ratio_px_to_mm, tracker, svm,
                                coin::Config::CLASSIFIER_NAMES[classifier_index],
-                               classifier_index, active_torch);
+                               classifier_index, active_torch, !do_detect);
 #else
             run_coin_detection(warped, ratio_px_to_mm, tracker, svm,
                                coin::Config::CLASSIFIER_NAMES[classifier_index],
-                               0, nullptr);
+                               0, nullptr, !do_detect);
 #endif
-            cv::Mat warped_small;
-            cv::resize(warped, warped_small, cv::Size(), 0.5, 0.5);
-            //cv::imshow("Warped", for_display(warped_small));
           }
         }
       }

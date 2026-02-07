@@ -64,6 +64,30 @@ endif()
 add_executable(coin_counter src/main_coin_counter.cpp)
 target_link_libraries(coin_counter PRIVATE coin_common)
 
+# DL-only pipeline: no SVM, no feature calculation, just detection + Torch inference
+if(Torch_FOUND)
+  set(COIN_DL_SOURCES
+    src/calibration.cpp
+    src/corner_stabilizer.cpp
+    src/coin_track.cpp
+    src/coin_tracker.cpp
+    src/coin_detector.cpp
+    src/torch_classifier.cpp
+  )
+  add_library(coin_dl_common ${COIN_DL_SOURCES})
+  target_include_directories(coin_dl_common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(coin_dl_common PUBLIC ${OPENCV_LIBS_COIN})
+  if(TARGET torch::torch)
+    target_link_libraries(coin_dl_common PUBLIC torch::torch)
+  else()
+    target_link_libraries(coin_dl_common PUBLIC ${TORCH_LIBRARIES})
+  endif()
+  target_compile_definitions(coin_dl_common PUBLIC COIN_USE_TORCH=1)
+
+  add_executable(coin_counter_dl src/main_coin_counter_dl.cpp)
+  target_link_libraries(coin_counter_dl PRIVATE coin_dl_common)
+endif()
+
 add_executable(camera_calibration src/main_camera_calibration.cpp)
 target_link_libraries(camera_calibration PRIVATE coin_common)
 

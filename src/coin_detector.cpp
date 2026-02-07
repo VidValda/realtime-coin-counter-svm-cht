@@ -16,7 +16,8 @@ namespace coin
   struct DetectionWorkspace
   {
     cv::Size size{0, 0};
-    cv::Mat binary, dist, sure_fg, label_mask;
+    cv::Mat binary, dist, sure_fg;
+    cv::Mat sure_bg, unknown, markers, watershed_input;
     void ensure_size(int rows, int cols)
     {
       if (size.height != rows || size.width != cols)
@@ -25,11 +26,38 @@ namespace coin
         binary.create(rows, cols, CV_8UC1);
         dist.create(rows, cols, CV_32F);
         sure_fg.create(rows, cols, CV_8UC1);
-        label_mask.create(rows, cols, CV_8UC1);
+        sure_bg.create(rows, cols, CV_8UC1);
+        unknown.create(rows, cols, CV_8UC1);
       }
     }
   };
   static DetectionWorkspace s_workspace;
+
+  /** Cached morphology kernels (config is constexpr). Avoid per-frame getStructuringElement. */
+  struct MorphCache
+  {
+    cv::Mat k_open_el, k_close_el, k_bg_el;
+    int k_open = -1, k_close = -1, k_bg = -1;
+    void ensure(int open_sz, int close_sz, int bg_sz)
+    {
+      if (k_open != open_sz)
+      {
+        k_open = open_sz;
+        k_open_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_open, k_open));
+      }
+      if (k_close != close_sz)
+      {
+        k_close = close_sz;
+        k_close_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_close, k_close));
+      }
+      if (k_bg != bg_sz)
+      {
+        k_bg = bg_sz;
+        k_bg_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_bg, k_bg));
+      }
+    }
+  };
+  static MorphCache s_morph;
 
   /** Get single channel for watershed: 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B */
   static cv::Mat get_channel(const cv::Mat &frame, int mode)
@@ -150,24 +178,18 @@ namespace coin
     if (Config::INVERT_BINARY)
       cv::bitwise_not(s_workspace.binary, s_workspace.binary);
 
-    // 2. Morphological open (one temp)
+    // 2. Morphological open then close — use cached kernels, operate in-place
     int k_open = ensure_odd(std::max(1, Config::MORPH_OPEN_SIZE));
-    cv::Mat k_open_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_open, k_open));
-    cv::Mat after_open;
-    cv::morphologyEx(s_workspace.binary, after_open, cv::MORPH_OPEN, k_open_el,
-                     cv::Point(-1, -1), std::max(0, Config::MORPH_OPEN_ITERS));
-
-    // 3. Morphological close -> back into workspace.binary
     int k_close = ensure_odd(std::max(1, Config::MORPH_CLOSE_SIZE));
-    cv::Mat k_close_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_close, k_close));
-    cv::morphologyEx(after_open, s_workspace.binary, cv::MORPH_CLOSE, k_close_el,
+    int k_bg = ensure_odd(std::max(1, Config::BG_DILATE_SIZE));
+    s_morph.ensure(k_open, k_close, k_bg);
+    cv::morphologyEx(s_workspace.binary, s_workspace.binary, cv::MORPH_OPEN, s_morph.k_open_el,
+                     cv::Point(-1, -1), std::max(0, Config::MORPH_OPEN_ITERS));
+    cv::morphologyEx(s_workspace.binary, s_workspace.binary, cv::MORPH_CLOSE, s_morph.k_close_el,
                      cv::Point(-1, -1), std::max(0, Config::MORPH_CLOSE_ITERS));
 
-    // 4. Sure background
-    int k_bg = ensure_odd(std::max(1, Config::BG_DILATE_SIZE));
-    cv::Mat k_bg_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_bg, k_bg));
-    cv::Mat sure_bg;
-    cv::dilate(s_workspace.binary, sure_bg, k_bg_el);
+    // 4. Sure background (reuse workspace buffer)
+    cv::dilate(s_workspace.binary, s_workspace.sure_bg, s_morph.k_bg_el);
 
     // 5. Distance transform -> sure foreground (reuse workspace.dist, workspace.sure_fg)
     int dsize = (Config::DIST_MASK_SIZE >= 4) ? 5 : 3;
@@ -193,45 +215,62 @@ namespace coin
     if (out_debug)
       s_workspace.binary.copyTo(out_debug->binary);
 
-    // 6. Unknown = sure_bg - sure_fg
-    cv::Mat unknown;
-    cv::subtract(sure_bg, s_workspace.sure_fg, unknown);
+    // 6. Unknown = sure_bg - sure_fg (reuse workspace buffer)
+    cv::subtract(s_workspace.sure_bg, s_workspace.sure_fg, s_workspace.unknown);
 
     // 7. Markers: connected components on sure_fg, then mark unknown as 0
-    cv::Mat markers;
-    int num_labels = cv::connectedComponents(s_workspace.sure_fg, markers);
-    markers.convertTo(markers, CV_32S);
-    markers += 1;
-    markers.setTo(0, unknown);
+    int num_labels = cv::connectedComponents(s_workspace.sure_fg, s_workspace.markers);
+    s_workspace.markers.convertTo(s_workspace.markers, CV_32S);
+    s_workspace.markers += 1;
+    s_workspace.markers.setTo(0, s_workspace.unknown);
 
     // Marker visualization (color by label) — build once, show once
-    if (out_debug && !markers.empty())
+    if (out_debug && !s_workspace.markers.empty())
     {
-      cv::Mat markers_vis = cv::Mat::zeros(markers.rows, markers.cols, CV_8UC3);
+      cv::Mat markers_vis = cv::Mat::zeros(s_workspace.markers.rows, s_workspace.markers.cols, CV_8UC3);
       std::mt19937 rng(42);
       std::uniform_int_distribution<int> u(150, 255);
       for (int lid = 1; lid <= num_labels; ++lid)
       {
         cv::Vec3b c(static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)));
-        markers_vis.setTo(c, markers == lid);
+        markers_vis.setTo(c, s_workspace.markers == lid);
       }
       out_debug->markers_vis = markers_vis;
     }
 
-    // 8. Watershed (requires 3-channel image)
-    cv::Mat watershed_input;
-    cv::cvtColor(s_workspace.binary, watershed_input, cv::COLOR_GRAY2BGR);
-    cv::Mat markers_out = markers.clone();
-    cv::watershed(watershed_input, markers_out);
+    // 8. Watershed (requires 3-channel image) — reuse buffer for input, clone markers for watershed
+    cv::cvtColor(s_workspace.binary, s_workspace.watershed_input, cv::COLOR_GRAY2BGR);
+    cv::Mat markers_out = s_workspace.markers.clone();
+    cv::watershed(s_workspace.watershed_input, markers_out);
 
-    // 9. Extract regions, filter by area/circularity/diameter, NMS
+    // 9. Extract regions: single pass to build per-label bounding boxes, then small ROI masks
     std::vector<Detection> detections;
+
+    struct LabelInfo { int x0, y0, x1, y1; };
+    std::vector<LabelInfo> label_bounds(num_labels + 1, {cols, rows, 0, 0});
+    for (int r = 0; r < markers_out.rows; ++r)
+    {
+      const int *mr = markers_out.ptr<int>(r);
+      for (int c = 0; c < markers_out.cols; ++c)
+      {
+        int lbl = mr[c];
+        if (lbl >= 2 && lbl <= num_labels)
+        {
+          auto &bb = label_bounds[lbl];
+          if (c < bb.x0) bb.x0 = c;
+          if (c > bb.x1) bb.x1 = c;
+          if (r < bb.y0) bb.y0 = r;
+          if (r > bb.y1) bb.y1 = r;
+        }
+      }
+    }
+
     cv::Mat segmentation_vis;
+    std::vector<cv::Vec3b> seg_palette;
     if (out_debug)
     {
       segmentation_vis = cv::Mat(frame.rows, frame.cols, CV_8UC3);
       segmentation_vis.setTo(cv::Scalar(180, 180, 180));
-      // Overlay original frame with transparency
       if (frame.channels() == 3)
         cv::addWeighted(segmentation_vis, 0.5, frame, 0.5, 0, segmentation_vis);
       else if (frame.channels() == 1)
@@ -240,34 +279,35 @@ namespace coin
         cv::cvtColor(frame, frame_bgr, cv::COLOR_GRAY2BGR);
         cv::addWeighted(segmentation_vis, 0.5, frame_bgr, 0.5, 0, segmentation_vis);
       }
-    }
-    // Same palette as marker visualization (label index 1..num_labels)
-    std::vector<cv::Vec3b> seg_palette;
-    if (out_debug && num_labels >= 1)
-    {
       seg_palette.resize(num_labels + 1);
       std::mt19937 rng_p(42);
       std::uniform_int_distribution<int> u_p(150, 255);
       for (int lid = 1; lid <= num_labels; ++lid)
         seg_palette[lid] = cv::Vec3b(static_cast<uchar>(u_p(rng_p)), static_cast<uchar>(u_p(rng_p)), static_cast<uchar>(u_p(rng_p)));
     }
+
     for (int label = 2; label <= num_labels; ++label)
     {
-      // Reuse single buffer: fill label_mask without allocating (markers_out == label) per label
-      for (int r = 0; r < markers_out.rows; ++r)
+      const auto &bb = label_bounds[label];
+      if (bb.x0 > bb.x1 || bb.y0 > bb.y1)
+        continue;
+      int bw = bb.x1 - bb.x0 + 1, bh = bb.y1 - bb.y0 + 1;
+      cv::Mat roi_mask(bh, bw, CV_8UC1, cv::Scalar(0));
+      for (int r = bb.y0; r <= bb.y1; ++r)
       {
         const int *mr = markers_out.ptr<int>(r);
-        uchar *lm = s_workspace.label_mask.ptr<uchar>(r);
-        for (int c = 0; c < markers_out.cols; ++c)
-          lm[c] = (mr[c] == label) ? 255 : 0;
+        uchar *rm = roi_mask.ptr<uchar>(r - bb.y0);
+        for (int c = bb.x0; c <= bb.x1; ++c)
+          rm[c - bb.x0] = (mr[c] == label) ? 255 : 0;
       }
       std::vector<std::vector<cv::Point>> contours;
-      cv::findContours(s_workspace.label_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+      cv::findContours(roi_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE,
+                        cv::Point(bb.x0, bb.y0));
       if (contours.empty())
         continue;
       const auto &cnt = *std::max_element(contours.begin(), contours.end(),
-                                          [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b)
-                                          { return cv::contourArea(a) < cv::contourArea(b); });
+                                          [](const std::vector<cv::Point> &a, const std::vector<cv::Point> &b2)
+                                          { return cv::contourArea(a) < cv::contourArea(b2); });
       double area = cv::contourArea(cnt);
       if (area < min_contour_area)
         continue;
@@ -292,10 +332,8 @@ namespace coin
       detections.push_back(det);
       if (out_debug && !segmentation_vis.empty() && label < static_cast<int>(seg_palette.size()))
       {
-        const cv::Vec3b &c = seg_palette[label];
-        cv::Mat colored_layer(segmentation_vis.size(), CV_8UC3, cv::Scalar::all(0));
-        colored_layer.setTo(c, s_workspace.label_mask);
-        cv::addWeighted(segmentation_vis, 0.2, colored_layer, 0.8, 0, segmentation_vis);
+        cv::drawContours(segmentation_vis, std::vector<std::vector<cv::Point>>{cnt}, 0,
+                         cv::Scalar(seg_palette[label][0], seg_palette[label][1], seg_palette[label][2]), -1);
       }
     }
 
@@ -327,19 +365,21 @@ namespace coin
   {
     const int max_w = Config::PAPER_DETECT_MAX_WIDTH;
     double scale = 1.0;
-    cv::Mat work = frame;
+    cv::Mat work;
     if (max_w > 0 && frame.cols > max_w)
     {
       scale = static_cast<double>(max_w) / frame.cols;
       cv::resize(frame, work, cv::Size(), scale, scale, cv::INTER_LINEAR);
     }
+    else
+      work = frame;
     const int min_area_scaled = static_cast<int>(Config::PAPER_MIN_AREA * scale * scale);
     const int line_min = static_cast<int>(Config::PAPER_LINE_MIN_LENGTH * scale);
 
     cv::Mat gray, gray_filtered;
     cv::cvtColor(work, gray, cv::COLOR_BGR2GRAY);
     cv::GaussianBlur(gray, gray_filtered, cv::Size(5, 5), 0);
-    cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(0);
+    static cv::Ptr<cv::LineSegmentDetector> lsd = cv::createLineSegmentDetector(0);
     std::vector<cv::Vec4f> lines;
     lsd->detect(gray_filtered, lines);
     cv::Mat line_mask = cv::Mat::zeros(gray_filtered.size(), CV_8UC1);
@@ -352,10 +392,12 @@ namespace coin
       }
     }
     int k = std::max(1, Config::PAPER_MORPH_KERNEL | 1);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k, k));
+    static cv::Mat paper_kernel;
+    if (paper_kernel.empty() || paper_kernel.rows != k)
+      paper_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(k, k));
     cv::Mat closed;
-    cv::morphologyEx(line_mask, closed, cv::MORPH_CLOSE, kernel);
-    cv::dilate(closed, closed, kernel);
+    cv::morphologyEx(line_mask, closed, cv::MORPH_CLOSE, paper_kernel);
+    cv::dilate(closed, closed, paper_kernel);
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(closed, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     std::sort(contours.begin(), contours.end(),

@@ -80,4 +80,4 @@ fi
 cd "${BUILD_DIR}"
 cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_TORCH=ON -DCMAKE_PREFIX_PATH="${LIBTORCH_CMAKE}"
 make -j"$(nproc 2>/dev/null || echo 4)"
-echo "Done. Run: ./coin_counter (keys 5/6 for CNN/ResNet18)"
+echo "Done. Run: ./coin_counter (keys 5/6 for CNN/ResNet18) or ./coin_counter_dl (DL-only, keys 1/2 for CNN/ResNet)"
