@@ -96,6 +96,9 @@ namespace coin
         /** If true, fill and show debug windows (Markers, Segmentation, Binary, Sure FG, Distance). Slower. */
         static constexpr bool SHOW_DEBUG_VIEWS = false;
 
+        /** If true, print per-frame pipeline timings to stderr. Toggle at runtime with 't' key. */
+        static constexpr bool PRINT_TIMINGS_DEFAULT = false;
+
         static constexpr int CLUSTER_COLORS_BGR[6][3] = {
             {180, 119, 31}, {14, 127, 255}, {44, 160, 44}, {40, 39, 214}, {189, 103, 148}, {75, 86, 140}};
 

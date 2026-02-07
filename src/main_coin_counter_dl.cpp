@@ -22,19 +22,19 @@ namespace
     double capture_ms = 0;
     double paper_ms = 0;
     double stabilizer_ms = 0;
-    double order_warp_ms = 0;   /* order_corners + getPerspectiveTransform + warpPerspective */
-    double det_prep_ms = 0;     /* resize/clone for detection input */
+    double order_warp_ms = 0;
+    double det_prep_ms = 0;
     double detect_coins_ms = 0;
     double tracker_ms = 0;
-    double torch_ms = 0;       /* predict_batch inside draw_coins */
-    double draw_rest_ms = 0;    /* copy, circles, text, no torch */
-    double display_ms = 0;     /* for_display + imshow */
+    double torch_ms = 0;
+    double draw_rest_ms = 0;
+    double display_ms = 0;
     double total_frame_ms = 0;
   };
 
   void print_timings(const PipelineTimings &t, int frame_id)
   {
-    std::cout << std::fixed << std::setprecision(2)
+    std::cerr << std::fixed << std::setprecision(2)
               << "frame " << frame_id
               << " | capture=" << t.capture_ms << " ms"
               << " | paper=" << t.paper_ms << " ms"
@@ -47,7 +47,7 @@ namespace
               << " | draw_rest=" << t.draw_rest_ms << " ms"
               << " | display=" << t.display_ms << " ms"
               << " | TOTAL=" << t.total_frame_ms << " ms"
-              << " (" << (1000.0 / t.total_frame_ms) << " FPS)\n";
+              << " (" << (1000.0 / std::max(t.total_frame_ms, 0.001)) << " FPS)\n";
   }
 
   cv::Mat for_display(const cv::Mat &mat)
@@ -78,42 +78,65 @@ namespace
     return 1.0 / coin::Config::SCALE_FACTOR;
   }
 
-  /** DL-only: no feature calculation; classify with Torch batch inference. */
+  /** Cached classification results to avoid re-classifying on skip frames. */
+  struct ClassificationCache
+  {
+    std::vector<int> class_ids;
+    double total_eur = 0.0;
+    size_t num_entries = 0;
+    bool valid = false;
+  };
+  static ClassificationCache s_clf_cache;
+
+  /** DL-only: classify with Torch batch inference, with caching for skip frames. */
   cv::Mat draw_coins(const cv::Mat &frame, coin::CoinTracker &tracker,
                      double ratio_px_to_mm, coin::TorchClassifier *torch_clf,
-                     const std::string &classifier_name, PipelineTimings *out_timings = nullptr)
+                     const std::string &classifier_name, bool reclassify,
+                     PipelineTimings *out_timings = nullptr)
   {
     auto t_draw_start = Clock::now();
     cv::Mat display;
     frame.copyTo(display);
     auto entries = tracker.get_stable_entries();
-    double total_eur = 0.0;
 
-    std::vector<int> cids;
-    if (torch_clf && torch_clf->is_loaded() && !entries.empty())
+    if (reclassify || !s_clf_cache.valid || s_clf_cache.num_entries != entries.size())
     {
-      std::vector<std::pair<cv::Point2i, int>> centers_radii;
-      centers_radii.reserve(entries.size());
-      for (const auto &e : entries)
-        centers_radii.emplace_back(e.first, coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm));
-      auto t_torch_start = Clock::now();
-      cids = torch_clf->predict_batch(frame, centers_radii);
-      if (out_timings)
-        out_timings->torch_ms = Ms(Clock::now() - t_torch_start).count();
+      s_clf_cache.class_ids.resize(entries.size(), 0);
+      s_clf_cache.total_eur = 0.0;
+      s_clf_cache.num_entries = entries.size();
+
+      std::vector<int> cids;
+      if (torch_clf && torch_clf->is_loaded() && !entries.empty())
+      {
+        std::vector<std::pair<cv::Point2i, int>> centers_radii;
+        centers_radii.reserve(entries.size());
+        for (const auto &e : entries)
+          centers_radii.emplace_back(e.first, coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm));
+        auto t_torch_start = Clock::now();
+        cids = torch_clf->predict_batch(frame, centers_radii);
+        if (out_timings)
+          out_timings->torch_ms = Ms(Clock::now() - t_torch_start).count();
+      }
+
+      for (size_t i = 0; i < entries.size(); ++i)
+      {
+        int cid = (i < cids.size()) ? (cids[i] % 6) : 0;
+        s_clf_cache.class_ids[i] = cid;
+        s_clf_cache.total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
+      }
+      s_clf_cache.valid = true;
     }
 
     for (size_t i = 0; i < entries.size(); ++i)
     {
       const auto &e = entries[i];
       int r = coin::diameter_mm_to_radius_px(e.second, ratio_px_to_mm);
-      double display_diameter_mm = e.second;
-      int cid = (i < cids.size()) ? (cids[i] % 6) : 0;
+      int cid = (i < s_clf_cache.class_ids.size()) ? s_clf_cache.class_ids[i] : 0;
       cv::Scalar color(coin::Config::CLUSTER_COLORS_BGR[cid][0],
                        coin::Config::CLUSTER_COLORS_BGR[cid][1],
                        coin::Config::CLUSTER_COLORS_BGR[cid][2]);
-      total_eur += coin::Config::CLASS_TO_VALUE_EUR[cid];
       cv::circle(display, e.first, r, color, 4);
-      std::string label = std::to_string(static_cast<int>(display_diameter_mm * 10) / 10.0).substr(0, 4) + "mm";
+      std::string label = std::to_string(static_cast<int>(e.second * 10) / 10.0).substr(0, 4) + "mm";
       cv::putText(display, label, cv::Point(e.first.x - 20, e.first.y - 10),
                   cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 4);
     }
@@ -123,7 +146,7 @@ namespace
     cv::putText(display, "Coins: " + std::to_string(entries.size()), cv::Point(20, 40),
                 cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
     std::ostringstream oss;
-    oss << std::fixed << std::setprecision(2) << "Total: " << total_eur << " EUR";
+    oss << std::fixed << std::setprecision(2) << "Total: " << s_clf_cache.total_eur << " EUR";
     cv::putText(display, oss.str(), cv::Point(20, 62), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
     cv::putText(display, "Clf: " + classifier_name + " (1=CNN 2=ResNet)", cv::Point(20, 82),
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(200, 200, 200), 2);
@@ -135,57 +158,59 @@ namespace
 
   bool run_coin_detection(const cv::Mat &warped, double ratio_px_to_mm,
                           coin::CoinTracker &tracker, coin::TorchClassifier *torch_clf,
-                          const std::string &classifier_name, PipelineTimings *out_timings = nullptr)
+                          const std::string &classifier_name, PipelineTimings *out_timings = nullptr,
+                          bool skip_detection = false)
   {
-    const double keep_frac = 1;
-    int cw = static_cast<int>(warped.cols * keep_frac);
-    int ch = static_cast<int>(warped.rows * keep_frac);
-    int cx = (warped.cols - cw) / 2;
-    int cy = (warped.rows - ch) / 2;
-    cv::Rect roi(cx, cy, cw, ch);
-    const bool full_roi = (cw == warped.cols && ch == warped.rows);
-
-    auto t0 = Clock::now();
-    cv::Mat det_input = full_roi ? warped : warped(roi).clone();
-    if (out_timings)
-      out_timings->det_prep_ms = Ms(Clock::now() - t0).count();
-
-    const bool show_debug = coin::Config::SHOW_DEBUG_VIEWS;
-    coin::DebugViews debug;
-    coin::DebugViews *out_debug = show_debug ? &debug : nullptr;
-    const double det_scale = coin::Config::COIN_DETECT_SCALE;
-    std::vector<coin::Detection> detections;
-
-    t0 = Clock::now();
-    if (det_scale <= 0 || det_scale >= 1.0)
+    if (!skip_detection)
     {
-      detections = coin::detect_and_measure_coins(det_input, ratio_px_to_mm, out_debug);
-    }
-    else
-    {
-      cv::Mat small;
-      cv::resize(det_input, small, cv::Size(), det_scale, det_scale, cv::INTER_LINEAR);
-      double ratio_small = ratio_px_to_mm / det_scale;
-      detections = coin::detect_and_measure_coins(small, ratio_small, out_debug, det_scale);
-      const double inv = 1.0 / det_scale;
-      for (auto &d : detections)
+      const double det_scale = coin::Config::COIN_DETECT_SCALE;
+      const bool show_debug = coin::Config::SHOW_DEBUG_VIEWS;
+      coin::DebugViews debug;
+      coin::DebugViews *out_debug = show_debug ? &debug : nullptr;
+      std::vector<coin::Detection> detections;
+
+      auto t0 = Clock::now();
+      if (det_scale <= 0 || det_scale >= 1.0)
       {
-        d.center.x = static_cast<int>(std::round(d.center.x * inv));
-        d.center.y = static_cast<int>(std::round(d.center.y * inv));
+        detections = coin::detect_and_measure_coins(warped, ratio_px_to_mm, out_debug);
+      }
+      else
+      {
+        cv::Mat small;
+        cv::resize(warped, small, cv::Size(), det_scale, det_scale, cv::INTER_LINEAR);
+        double ratio_small = ratio_px_to_mm / det_scale;
+        detections = coin::detect_and_measure_coins(small, ratio_small, out_debug, det_scale);
+        const double inv = 1.0 / det_scale;
+        for (auto &d : detections)
+        {
+          d.center.x = static_cast<int>(std::round(d.center.x * inv));
+          d.center.y = static_cast<int>(std::round(d.center.y * inv));
+        }
+      }
+      if (out_timings)
+        out_timings->detect_coins_ms = Ms(Clock::now() - t0).count();
+
+      t0 = Clock::now();
+      tracker.update(detections);
+      if (out_timings)
+        out_timings->tracker_ms = Ms(Clock::now() - t0).count();
+
+      if (show_debug)
+      {
+        if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
+          cv::imshow("Debug: Markers", for_display(debug.markers_vis));
+        if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
+          cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
+        if (!debug.binary.empty() && debug.binary.total() > 0)
+          cv::imshow("Debug: Binary", for_display(debug.binary));
+        if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
+          cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
+        if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
+          cv::imshow("Debug: Distance", for_display(debug.dist_vis));
       }
     }
-    if (out_timings)
-      out_timings->detect_coins_ms = Ms(Clock::now() - t0).count();
 
-    t0 = Clock::now();
-    for (auto &d : detections)
-      d.center += cv::Point2i(roi.x, roi.y);
-    tracker.update(detections);
-    if (out_timings)
-      out_timings->tracker_ms = Ms(Clock::now() - t0).count();
-
-    t0 = Clock::now();
-    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, torch_clf, classifier_name, out_timings);
+    cv::Mat display = draw_coins(warped, tracker, ratio_px_to_mm, torch_clf, classifier_name, !skip_detection, out_timings);
     {
       static int64_t prev_ticks = cv::getTickCount();
       int64_t ticks = cv::getTickCount();
@@ -198,20 +223,6 @@ namespace
     cv::imshow("Anti-Glare Detection", for_display(display));
     if (out_timings)
       out_timings->display_ms = Ms(Clock::now() - t_disp).count();
-
-    if (show_debug)
-    {
-      if (!debug.markers_vis.empty() && debug.markers_vis.total() > 0)
-        cv::imshow("Debug: Markers", for_display(debug.markers_vis));
-      if (!debug.segmentation.empty() && debug.segmentation.total() > 0)
-        cv::imshow("Debug: Segmentation", for_display(debug.segmentation));
-      if (!debug.binary.empty() && debug.binary.total() > 0)
-        cv::imshow("Debug: Binary", for_display(debug.binary));
-      if (!debug.sure_fg.empty() && debug.sure_fg.total() > 0)
-        cv::imshow("Debug: Sure FG", for_display(debug.sure_fg));
-      if (!debug.dist_vis.empty() && debug.dist_vis.total() > 0)
-        cv::imshow("Debug: Distance", for_display(debug.dist_vis));
-    }
     return true;
   }
 }
@@ -260,8 +271,8 @@ int main()
   int width_px = static_cast<int>(coin::Config::PAPER_WIDTH_MM * coin::Config::SCALE_FACTOR);
   int height_px = static_cast<int>(coin::Config::PAPER_HEIGHT_MM * coin::Config::SCALE_FACTOR);
 
-  std::cout << "coin_counter_dl: DL-only pipeline (no feature extraction).\n";
-  std::cout << "Using px-to-mm ratio: " << ratio_px_to_mm << " mm/px.\n";
+  std::cout << "coin_counter_dl: DL-only pipeline (no feature extraction)." << std::endl;
+  std::cout << "Using px-to-mm ratio: " << ratio_px_to_mm << " mm/px." << std::endl;
 
   coin::CornerStabilizer stabilizer(coin::Config::STABILIZER_WINDOW);
   coin::CoinTracker tracker;
@@ -300,11 +311,16 @@ int main()
   if (!ensure_classifier())
     return 1;
   coin::TorchClassifier *active_torch = (classifier_index == 0) ? &torch_cnn : &torch_resnet;
-  std::cout << "Classifier: " << DL_NAMES[classifier_index] << " (press 1=CNN 2=ResNet, q=quit)\n";
-  std::cout << "Pipeline timings (ms) printed every frame. Header re-printed every 60 frames.\n\n";
+  std::cout << "Classifier: " << DL_NAMES[classifier_index] << " (press 1=CNN 2=ResNet, t=timings, q=quit)" << std::endl;
+
+  bool print_timings_enabled = coin::Config::PRINT_TIMINGS_DEFAULT;
+  std::cout << "Timings: " << (print_timings_enabled ? "ON" : "OFF") << " (press 't' to toggle)\n" << std::endl;
 
   int frame_count = 0;
+  int coin_detect_count = 0;
   std::optional<cv::Mat> last_raw_corners;
+  cv::Mat warped(height_px, width_px, CV_8UC3);
+  cv::Mat cached_M;
 
   const char *test_videos[] = {coin::Config::TEST_VIDEO_1, coin::Config::TEST_VIDEO_2};
   const int num_test_videos = sizeof(test_videos) / sizeof(test_videos[0]);
@@ -361,25 +377,29 @@ int main()
       if (stable_corners.has_value() && !stable_corners->empty() &&
           stable_corners->rows == 4 && stable_corners->cols >= 2)
       {
-        auto t_ow = Clock::now();
         cv::Mat rect = coin::order_corners(*stable_corners);
-        cv::Mat M = cv::getPerspectiveTransform(rect, dst_corners);
-        if (std::abs(cv::determinant(M)) > 1e-6)
+        cached_M = cv::getPerspectiveTransform(rect, dst_corners);
+      }
+
+      if (!cached_M.empty())
+      {
+        double det = cv::determinant(cached_M);
+        if (std::abs(det) > 1e-6)
         {
-          cv::Mat warped;
-          cv::warpPerspective(frame, warped, M, cv::Size(width_px, height_px));
+          auto t_ow = Clock::now();
+          cv::warpPerspective(frame, warped, cached_M, cv::Size(width_px, height_px));
           timings.order_warp_ms = Ms(Clock::now() - t_ow).count();
+
           if (!warped.empty() && warped.rows > 0 && warped.cols > 0)
           {
+            const int coin_every_n = std::max(1, coin::Config::COIN_DETECT_EVERY_N_FRAMES);
+            bool do_detect = (coin_every_n <= 1 || (++coin_detect_count % coin_every_n) == 1);
             active_torch = (classifier_index == 0) ? &torch_cnn : &torch_resnet;
-            run_coin_detection(warped, ratio_px_to_mm, tracker, active_torch, DL_NAMES[classifier_index], &timings);
+            run_coin_detection(warped, ratio_px_to_mm, tracker, active_torch,
+                               DL_NAMES[classifier_index], &timings, !do_detect);
           }
         }
-        else
-          timings.order_warp_ms = Ms(Clock::now() - t_ow).count();
       }
-      else
-        timings.order_warp_ms = 0;
 
       if (raw_corners.has_value())
       {
@@ -390,9 +410,12 @@ int main()
       }
 
       timings.total_frame_ms = Ms(Clock::now() - frame_start).count();
-      if (frame_count % 60 == 1)
-        std::cout << "frame    | capture | paper | stabilizer | order+warp | det_prep | detect_coins | tracker | torch | draw_rest | display | TOTAL (ms) | FPS\n";
-      print_timings(timings, frame_count);
+      if (print_timings_enabled)
+      {
+        if (frame_count % 60 == 1)
+          std::cerr << "frame    | capture | paper | stabilizer | order+warp | det_prep | detect_coins | tracker | torch | draw_rest | display | TOTAL (ms) | FPS\n";
+        print_timings(timings, frame_count);
+      }
     }
     catch (const cv::Exception &e)
     {
@@ -406,12 +429,18 @@ int main()
     int key = cv::waitKey(1);
     if (key == 'q')
       break;
+    if (key == 't')
+    {
+      print_timings_enabled = !print_timings_enabled;
+      std::cout << "Timings: " << (print_timings_enabled ? "ON" : "OFF") << "\n";
+    }
     if (key == '1' || key == '2')
     {
       classifier_index = key - '1';
       if (ensure_classifier())
       {
         active_torch = (classifier_index == 0) ? &torch_cnn : &torch_resnet;
+        s_clf_cache.valid = false;
         std::cout << "Switched to " << DL_NAMES[classifier_index] << "\n";
       }
     }
