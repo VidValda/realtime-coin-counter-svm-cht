@@ -1,10 +1,3 @@
-"""
-Debug tool for coin detection using watershed segmentation.
-Live camera: paper detection + warp, then watershed on the warped image.
-Visualizes all steps; adaptive + Otsu thresholding; many tunable parameters.
-Press 'q' to quit.
-"""
-
 from __future__ import annotations
 
 import collections
@@ -14,29 +7,28 @@ from typing import Any, Deque, List, Optional, Tuple
 import cv2
 import numpy as np
 
-# Watershed + preprocessing defaults (from tuned GUI)
 DEFAULTS = {
-    "CHANNEL_MODE": 2,  # 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B
+    "CHANNEL_MODE": 2,
     "CLAHE_CLIP": 9,
-    "CLAHE_GRID": 1,  # GUI showed 0; grid must be >= 1
+    "CLAHE_GRID": 1,
     "BLUR_KSIZE": 9,
-    "use_adaptive": 0,  # 0=Otsu, 1=Adaptive
+    "use_adaptive": 0,
     "adaptive_block": 23,
-    "adaptive_C": 10,  # slider 60 → stored 10 (trackbar: v - 50)
+    "adaptive_C": 10,
     "invert_binary": 1,
     "morph_open_size": 1,
     "morph_close_size": 3,
     "morph_open_iters": 2,
     "morph_close_iters": 4,
     "bg_dilate_size": 4,
-    "dist_mask_size": 5,  # 3 or 5 (slider 1 → 5)
-    "watershed_fg_frac": 0.45,  # FG frac x100 = 57
+    "dist_mask_size": 5,
+    "watershed_fg_frac": 0.45,
     "MIN_CONTOUR_AREA": 464,
     "MIN_CIRCULARITY": 0.56,
     "DIAMETER_MM_MIN": 10.0,
     "DIAMETER_MM_MAX": 40.0,
     "CENTER_MATCH_PX": 20,
-    "SCALE_FACTOR": 5.0,  # Scale x10 = 50
+    "SCALE_FACTOR": 5.0,
     "paper_line_min_length": 100,
     "paper_morph_kernel": 3,
     "paper_approx_eps_factor": 0.02,
@@ -49,9 +41,8 @@ DEFAULTS = {
 
 @dataclass
 class WatershedSteps:
-    """All intermediate images for visualization."""
     blurred: Optional[np.ndarray] = None
-    gradient_for_watershed: Optional[np.ndarray] = None  # image actually passed to watershed
+    gradient_for_watershed: Optional[np.ndarray] = None
     binary: Optional[np.ndarray] = None
     after_open: Optional[np.ndarray] = None
     after_close: Optional[np.ndarray] = None
@@ -153,14 +144,13 @@ class CornerStabilizer:
 
 
 def preprocess_for_circles(frame: np.ndarray, p: dict) -> np.ndarray:
-    # 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B
     mode = p.get("CHANNEL_MODE", 0)
     if mode == 0:
         ch = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     elif mode in (1, 2, 3):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         ch = hsv[:, :, mode - 1]
-    else:  # 4=L, 5=A, 6=B
+    else:
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         ch = lab[:, :, mode - 4]
     clahe = cv2.createCLAHE(clipLimit=p["CLAHE_CLIP"], tileGridSize=(p["CLAHE_GRID"], p["CLAHE_GRID"]))
@@ -170,7 +160,6 @@ def preprocess_for_circles(frame: np.ndarray, p: dict) -> np.ndarray:
 
 
 def _show_step(img: Optional[np.ndarray], scale: float = 0.5, title: str = "") -> np.ndarray:
-    """Resize and optionally add title; return 3-channel for imshow."""
     if img is None or img.size == 0:
         out = np.zeros((200, 280, 3), dtype=np.uint8)
         cv2.putText(out, "N/A", (100, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
@@ -190,20 +179,14 @@ def detect_coins_watershed(
     ratio_px_to_mm: float,
     p: dict,
 ) -> WatershedSteps:
-    """
-    Watershed segmentation with adaptive or Otsu thresholding.
-    Returns WatershedSteps with all intermediate images for visualization.
-    """
     steps = WatershedSteps()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blurred = preprocess_for_circles(frame, p)
     steps.blurred = blurred
 
-    # 1. Threshold: Adaptive or Otsu
     if p.get("use_adaptive", 1):
         block = p["adaptive_block"]
         C = p["adaptive_C"]
-        # Adaptive: local mean/gaussian threshold (coins often darker -> THRESH_BINARY_INV for foreground = coins)
         binary = cv2.adaptiveThreshold(
             blurred, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -216,23 +199,19 @@ def detect_coins_watershed(
         binary = cv2.bitwise_not(binary)
     steps.binary = binary.copy()
 
-    # 2. Morphological open (remove noise)
     k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (p["morph_open_size"], p["morph_open_size"]))
     after_open = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k_open, iterations=p["morph_open_iters"])
     steps.after_open = after_open.copy()
 
-    # 3. Morphological close (fill holes inside coins)
     k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (p["morph_close_size"], p["morph_close_size"]))
     after_close = cv2.morphologyEx(after_open, cv2.MORPH_CLOSE, k_close, iterations=p["morph_close_iters"])
     steps.after_close = after_close.copy()
     binary = after_close
 
-    # 4. Sure background
     k_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (p["bg_dilate_size"], p["bg_dilate_size"]))
     sure_bg = cv2.dilate(binary, k_bg)
     steps.sure_bg = sure_bg.copy()
 
-    # 5. Distance transform -> sure foreground
     dsize = p.get("dist_mask_size", 5)
     dist = cv2.distanceTransform(binary, cv2.DIST_L2, dsize)
     dist_max = dist.max()
@@ -245,16 +224,13 @@ def detect_coins_watershed(
     sure_fg = np.uint8(sure_fg)
     steps.sure_fg = sure_fg.copy()
 
-    # 6. Unknown region
     unknown = cv2.subtract(sure_bg, sure_fg)
     steps.unknown = unknown.copy()
 
-    # 7. Markers
     num_labels, markers = cv2.connectedComponents(sure_fg)
     markers = markers.astype(np.int32)
     markers = markers + 1
     markers[unknown == 255] = 0
-    # Visualize markers (color by label)
     np.random.seed(42)
     markers_vis = np.zeros((*markers.shape, 3), dtype=np.uint8)
     for lid in range(1, num_labels + 1):
@@ -262,14 +238,11 @@ def detect_coins_watershed(
         markers_vis[markers == lid] = c
     steps.markers_vis = markers_vis
 
-    # 8. Watershed
     watershed_input = cv2.cvtColor(steps.after_close, cv2.COLOR_GRAY2BGR)
     markers_out = markers.copy()
     cv2.imshow("Watershed input", watershed_input)
     cv2.watershed(watershed_input, markers_out)
 
-
-    # 9. Extract regions and measure; build watershed vis
     detections: List[Tuple[Tuple[int, int], float]] = []
     watershed_vis = watershed_input
     colors = [np.array(np.random.randint(50, 255, 3), dtype=np.float64) for _ in range(num_labels + 1)]
@@ -311,7 +284,6 @@ def detect_coins_watershed(
 
 
 def detect_and_measure_coins(frame: np.ndarray, ratio_px_to_mm: float, p: dict) -> List[Tuple[Tuple[int, int], float]]:
-    """Use watershed segmentation for coin detection."""
     steps = detect_coins_watershed(frame, ratio_px_to_mm, p)
     return steps.detections
 
@@ -334,24 +306,20 @@ def main() -> None:
     cv2.namedWindow(win)
     scale_vis = 0.45
 
-    # Preprocessing (channel: 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B)
     cv2.createTrackbar("Channel 0-6", win, DEFAULTS["CHANNEL_MODE"], 6, lambda v: set_state("CHANNEL_MODE", v))
     cv2.createTrackbar("CLAHE clip", win, DEFAULTS["CLAHE_CLIP"], 20, lambda v: set_state("CLAHE_CLIP", max(1, v)))
     cv2.createTrackbar("CLAHE grid", win, DEFAULTS["CLAHE_GRID"], 8, lambda v: set_state("CLAHE_GRID", max(1, v)))
     cv2.createTrackbar("Blur ksize", win, DEFAULTS["BLUR_KSIZE"], 15, lambda v: set_state("BLUR_KSIZE", _ensure_odd(max(1, v))))
-    # Threshold
     cv2.createTrackbar("0=Otsu 1=Adapt", win, DEFAULTS["use_adaptive"], 1, lambda v: set_state("use_adaptive", v))
     cv2.createTrackbar("Adapt block", win, DEFAULTS["adaptive_block"], 51, lambda v: set_state("adaptive_block", _ensure_odd(max(3, v))))
     cv2.createTrackbar("Adapt C", win, DEFAULTS["adaptive_C"] + 50, 100, lambda v: set_state("adaptive_C", v - 50))
     cv2.createTrackbar("Invert bin", win, DEFAULTS["invert_binary"], 1, lambda v: set_state("invert_binary", v))
-    # Morph
     cv2.createTrackbar("Open size", win, DEFAULTS["morph_open_size"], 15, lambda v: set_state("morph_open_size", _ensure_odd(max(1, v))))
     cv2.createTrackbar("Close size", win, DEFAULTS["morph_close_size"], 21, lambda v: set_state("morph_close_size", _ensure_odd(max(1, v))))
     cv2.createTrackbar("Open iters", win, DEFAULTS["morph_open_iters"], 5, lambda v: set_state("morph_open_iters", v))
     cv2.createTrackbar("Close iters", win, DEFAULTS["morph_close_iters"], 5, lambda v: set_state("morph_close_iters", v))
     cv2.createTrackbar("BG dilate", win, DEFAULTS["bg_dilate_size"], 21, lambda v: set_state("bg_dilate_size", _ensure_odd(max(1, v))))
     cv2.createTrackbar("Dist mask 3/5", win, 1, 1, lambda v: set_state("dist_mask_size", 5 if v else 3))
-    # Watershed + filters
     cv2.createTrackbar("FG frac x100", win, int(DEFAULTS["watershed_fg_frac"] * 100), 60, lambda v: set_state("watershed_fg_frac", max(20, v) / 100.0))
     cv2.createTrackbar("Min area", win, int(DEFAULTS["MIN_CONTOUR_AREA"]), 500, lambda v: set_state("MIN_CONTOUR_AREA", float(max(1, v))))
     cv2.createTrackbar("Circ x100", win, int(DEFAULTS["MIN_CIRCULARITY"] * 100), 100, lambda v: set_state("MIN_CIRCULARITY", v / 100.0))

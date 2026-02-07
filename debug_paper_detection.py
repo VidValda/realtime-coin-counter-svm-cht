@@ -1,9 +1,3 @@
-"""
-Debug tool for paper detection and warping.
-Live camera feed with sliders for all paper/warp parameters; updates in real time.
-Press 'q' to quit.
-"""
-
 from __future__ import annotations
 
 import collections
@@ -13,7 +7,6 @@ from typing import Deque, Optional
 import cv2
 import numpy as np
 
-# Defaults match Config
 DEFAULTS = {
     "paper_line_min_length": 100,
     "paper_morph_kernel": 3,
@@ -25,7 +18,6 @@ DEFAULTS = {
     "stabilizer_window": 10,
 }
 
-# Global state for trackbar callbacks (OpenCV requires a single ref)
 _state: dict = {}
 
 
@@ -107,7 +99,6 @@ def main() -> None:
         print("Could not open camera (index 2). Try changing camera_index in the script.")
         return
 
-    # SCALE_FACTOR 1.0-5.0: slider 10-50 -> value = x/10
     cv2.namedWindow("Paper detection")
     cv2.createTrackbar("line_min_len", "Paper detection", DEFAULTS["paper_line_min_length"], 300, lambda v: _state.__setitem__("paper_line_min_length", v))
     cv2.createTrackbar("morph_kernel", "Paper detection", DEFAULTS["paper_morph_kernel"], 15, lambda v: _state.__setitem__("paper_morph_kernel", max(1, (v | 1))))
@@ -149,7 +140,6 @@ def main() -> None:
                 warped = cv2.warpPerspective(frame, M, (w_px, h_px))
                 warped_display = warped
 
-        # Show camera + contour (resized to fit)
         scale_show = 0.6
         small = cv2.resize(display, (0, 0), fx=scale_show, fy=scale_show)
         cv2.imshow("Paper detection", small)

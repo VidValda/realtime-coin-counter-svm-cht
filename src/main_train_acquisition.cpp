@@ -26,7 +26,6 @@ namespace
   const char *IMAGES_DIR = "images";
   const char *LABELS_DIR = "labels";
 
-  /** Class id to label string for JSON (index = class_id). */
   const char *CLASS_LABELS[] = {"20cent", "10cent", "1euro", "1cent", "2cent", "5cent"};
 
   struct Zone
@@ -57,14 +56,13 @@ namespace
       {"2 cent", 4},
       {"5 cent", 5}};
 
-  /** 6 fixed sequences: each row is the class_id order for zones left-to-right. */
   const int SEQUENCES[6][6] = {
-      {0, 1, 2, 3, 4, 5}, /* seq 0: 20c, 10c, 1€, 1c, 2c, 5c */
-      {1, 0, 3, 4, 5, 2}, /* seq 1 */
-      {2, 3, 4, 5, 0, 1}, /* seq 2 */
-      {3, 4, 5, 0, 1, 2}, /* seq 3 */
-      {4, 5, 0, 1, 2, 3}, /* seq 4 */
-      {5, 0, 1, 2, 3, 4}, /* seq 5 */
+      {0, 1, 2, 3, 4, 5},
+      {1, 0, 3, 4, 5, 2},
+      {2, 3, 4, 5, 0, 1},
+      {3, 4, 5, 0, 1, 2},
+      {4, 5, 0, 1, 2, 3},
+      {5, 0, 1, 2, 3, 4},
   };
 
   std::vector<Zone> build_zones_for_sequence(int sequence_index)

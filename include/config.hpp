@@ -5,13 +5,10 @@ namespace coin
 
     struct Config
     {
-        // Watershed pipeline (from debug_coin_detection.py defaults)
         static constexpr int CLAHE_CLIP = 9;
         static constexpr int CLAHE_GRID = 1;
         static constexpr int BLUR_KSIZE = 9;
-        /** 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B */
         static constexpr int CHANNEL_MODE = 2;
-        /** 0=Otsu, 1=Adaptive */
         static constexpr int USE_ADAPTIVE = 0;
         static constexpr int ADAPTIVE_BLOCK = 23;
         static constexpr int ADAPTIVE_C = 10;
@@ -56,17 +53,14 @@ namespace coin
             "coin_svm.yaml", "coin_knn.yaml", "coin_rtrees.yaml", "coin_nb.yaml"};
         static constexpr const char *CLASSIFIER_NAMES[6] = {"SVM", "KNN", "RandomForest", "NaiveBayes", "CNN", "ResNet18"};
         static constexpr const char *CLASSIFIER_DEFAULT_FILE = "classifier_default.txt";
-        /** TorchScript models (export with export_torchscript.py from coin_cnn.pt / coin_resnet18.pt). */
         static constexpr const char *COIN_CNN_TRACED_PATH = "coin_cnn_traced.pt";
         static constexpr const char *COIN_RESNET18_TRACED_PATH = "coin_resnet18_traced.pt";
         static constexpr int COIN_CROP_SIZE = 150;
         static constexpr const char *TRAINING_DATA_DIR = "training_data_2";
         static constexpr const char *TRAINING_MANIFEST = "training_data_2/manifest.csv";
 
-        /** Test videos for coin counter (used when USE_TEST_VIDEOS is true). */
         static constexpr const char *TEST_VIDEO_1 = "test1.mp4";
         static constexpr const char *TEST_VIDEO_2 = "test2.mp4";
-        /** If true, read from test videos instead of camera. */
         static constexpr bool USE_TEST_VIDEOS = false;
 
         static constexpr double PAPER_WIDTH_MM = 330.0;
@@ -77,26 +71,18 @@ namespace coin
         static constexpr int PAPER_MORPH_KERNEL = 3;
         static constexpr double PAPER_APPROX_EPS_FACTOR = 0.02;
         static constexpr int PAPER_MIN_AREA = 10000;
-        /** Run find_paper_corners on frame scaled to this max width (0 = full res). Speeds up LSD. */
         static constexpr int PAPER_DETECT_MAX_WIDTH = 480;
         static constexpr int STABILIZER_WINDOW = 10;
-        /** Run coin detection at this scale (0.5 = half res). Detection results scaled back. Lower = faster, ~4x at 0.5. */
         static constexpr double COIN_DETECT_SCALE = 1;
 
-        /** Run find_paper_corners every this many frames (1 = every frame). Higher values reduce CPU when paper is stable. */
         static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 50;
 
-        /** Run coin detection (watershed) every this many frames (1 = every frame). Between detections the tracker
-         *  state is reused and only the drawing/classification step runs. 3-5 is a good trade-off. */
         static constexpr int COIN_DETECT_EVERY_N_FRAMES = 5;
 
-        /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
         static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
 
-        /** If true, fill and show debug windows (Markers, Segmentation, Binary, Sure FG, Distance). Slower. */
         static constexpr bool SHOW_DEBUG_VIEWS = false;
 
-        /** If true, print per-frame pipeline timings to stderr. Toggle at runtime with 't' key. */
         static constexpr bool PRINT_TIMINGS_DEFAULT = false;
 
         static constexpr int CLUSTER_COLORS_BGR[6][3] = {

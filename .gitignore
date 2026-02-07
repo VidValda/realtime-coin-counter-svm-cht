@@ -1,4 +1,3 @@
-# Build directories (track .yaml and training_data inside build/)
 build/*
 !build/*.yaml
 !build/**/*.yaml
@@ -9,7 +8,6 @@ build/*
 cmake-build-*/
 out/
 
-# Compiled files
 *.o
 *.obj
 *.a
@@ -17,25 +15,21 @@ out/
 *.so
 *.dylib
 
-# Executables
 *.exe
 *.out
 
-# CMake generated files
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
 compile_commands.json
 
-# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -43,6 +37,5 @@ __pycache__/
 venv/
 .env
 
-# OS files
 .DS_Store
 Thumbs.db

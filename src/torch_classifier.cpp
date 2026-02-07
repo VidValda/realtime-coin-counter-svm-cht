@@ -17,7 +17,6 @@ namespace coin
     constexpr int CROP = Config::COIN_CROP_SIZE;
   }
 
-  /** Extract 150x150 crop centered at (cx,cy); pad with black if out of bounds. */
   static cv::Mat extract_crop(const cv::Mat &frame_bgr, int cx, int cy)
   {
     const int h = frame_bgr.rows, w = frame_bgr.cols;
@@ -37,7 +36,6 @@ namespace coin
     return out;
   }
 
-  /** Convert BGR 150x150 OpenCV mat to 1x3x150x150 float tensor (ImageNet normalize). */
   static torch::Tensor mat_to_tensor(const cv::Mat &bgr)
   {
     cv::Mat rgb;
@@ -100,7 +98,6 @@ namespace coin
       cv::Mat crop = extract_crop(frame_bgr, cr.first.x, cr.first.y);
       tensors.push_back(mat_to_tensor(crop));
     }
-    // stack([1,3,H,W], ...) -> [N,1,3,H,W]; model expects [N,3,H,W]
     torch::Tensor batch = torch::stack(tensors, 0).squeeze(1);
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(batch);

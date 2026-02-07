@@ -12,7 +12,6 @@ namespace coin
 
   static int ensure_odd(int k) { return std::max(1, k | 1); }
 
-  /** Reusable buffers for detect_and_measure_coins to avoid per-frame reallocations. */
   struct DetectionWorkspace
   {
     cv::Size size{0, 0};
@@ -33,7 +32,6 @@ namespace coin
   };
   static DetectionWorkspace s_workspace;
 
-  /** Cached morphology kernels (config is constexpr). Avoid per-frame getStructuringElement. */
   struct MorphCache
   {
     cv::Mat k_open_el, k_close_el, k_bg_el;
@@ -59,7 +57,6 @@ namespace coin
   };
   static MorphCache s_morph;
 
-  /** Get single channel for watershed: 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B */
   static cv::Mat get_channel(const cv::Mat &frame, int mode)
   {
     mode = std::max(0, std::min(6, mode));
@@ -82,7 +79,6 @@ namespace coin
     return ch;
   }
 
-  /** Preprocess for watershed: channel -> CLAHE -> median blur. CLAHE is cached to avoid alloc per frame. */
   static cv::Mat preprocess_for_watershed(const cv::Mat &frame)
   {
     cv::Mat ch = get_channel(frame, Config::CHANNEL_MODE);
@@ -163,7 +159,6 @@ namespace coin
 
     cv::Mat blurred = preprocess_for_watershed(frame);
 
-    // 1. Threshold: Otsu or Adaptive (reuse workspace.binary)
     if (Config::USE_ADAPTIVE)
     {
       int block = ensure_odd(std::max(3, std::min(51, Config::ADAPTIVE_BLOCK)));
@@ -178,7 +173,6 @@ namespace coin
     if (Config::INVERT_BINARY)
       cv::bitwise_not(s_workspace.binary, s_workspace.binary);
 
-    // 2. Morphological open then close — use cached kernels, operate in-place
     int k_open = ensure_odd(std::max(1, Config::MORPH_OPEN_SIZE));
     int k_close = ensure_odd(std::max(1, Config::MORPH_CLOSE_SIZE));
     int k_bg = ensure_odd(std::max(1, Config::BG_DILATE_SIZE));
@@ -188,10 +182,8 @@ namespace coin
     cv::morphologyEx(s_workspace.binary, s_workspace.binary, cv::MORPH_CLOSE, s_morph.k_close_el,
                      cv::Point(-1, -1), std::max(0, Config::MORPH_CLOSE_ITERS));
 
-    // 4. Sure background (reuse workspace buffer)
     cv::dilate(s_workspace.binary, s_workspace.sure_bg, s_morph.k_bg_el);
 
-    // 5. Distance transform -> sure foreground (reuse workspace.dist, workspace.sure_fg)
     int dsize = (Config::DIST_MASK_SIZE >= 4) ? 5 : 3;
     cv::distanceTransform(s_workspace.binary, s_workspace.dist, cv::DIST_L2, dsize);
     double dist_max;
@@ -215,16 +207,13 @@ namespace coin
     if (out_debug)
       s_workspace.binary.copyTo(out_debug->binary);
 
-    // 6. Unknown = sure_bg - sure_fg (reuse workspace buffer)
     cv::subtract(s_workspace.sure_bg, s_workspace.sure_fg, s_workspace.unknown);
 
-    // 7. Markers: connected components on sure_fg, then mark unknown as 0
     int num_labels = cv::connectedComponents(s_workspace.sure_fg, s_workspace.markers);
     s_workspace.markers.convertTo(s_workspace.markers, CV_32S);
     s_workspace.markers += 1;
     s_workspace.markers.setTo(0, s_workspace.unknown);
 
-    // Marker visualization (color by label) — build once, show once
     if (out_debug && !s_workspace.markers.empty())
     {
       cv::Mat markers_vis = cv::Mat::zeros(s_workspace.markers.rows, s_workspace.markers.cols, CV_8UC3);
@@ -238,12 +227,10 @@ namespace coin
       out_debug->markers_vis = markers_vis;
     }
 
-    // 8. Watershed (requires 3-channel image) — reuse buffer for input, clone markers for watershed
     cv::cvtColor(s_workspace.binary, s_workspace.watershed_input, cv::COLOR_GRAY2BGR);
     cv::Mat markers_out = s_workspace.markers.clone();
     cv::watershed(s_workspace.watershed_input, markers_out);
 
-    // 9. Extract regions: single pass to build per-label bounding boxes, then small ROI masks
     std::vector<Detection> detections;
 
     struct LabelInfo { int x0, y0, x1, y1; };
@@ -340,7 +327,6 @@ namespace coin
     if (out_debug && !segmentation_vis.empty())
       out_debug->segmentation = segmentation_vis;
 
-    // NMS by center distance
     Detections kept;
     for (const auto &d : detections)
     {

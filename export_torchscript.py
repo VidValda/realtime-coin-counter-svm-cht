@@ -1,12 +1,3 @@
-"""
-Export coin_cnn.pt and coin_resnet18.pt to TorchScript for C++ (LibTorch) inference.
-Run from project root: python export_torchscript.py
-Output: coin_cnn_traced.pt, coin_resnet18_traced.pt (load with torch::jit::load in C++).
-
-Requires LibTorch 2.5+ on the C++ side; older LibTorch (e.g. 1.x) only supports
-an older file format and will fail with "maximum supported version for reading is 1".
-Use build_with_torch.sh to download a compatible LibTorch.
-"""
 import torch
 import torch.nn as nn
 from torchvision.models import resnet18
@@ -43,7 +34,6 @@ def main():
 
     load_kw = {"map_location": device}
 
-    # Export CNN
     ckpt = torch.load("coin_cnn.pt", **load_kw)
     model_cnn = SmallCNN(num_classes=NUM_CLASSES)
     model_cnn.load_state_dict(ckpt["model_state"], strict=True)
@@ -52,7 +42,6 @@ def main():
     traced_cnn.save("coin_cnn_traced.pt")
     print("Saved coin_cnn_traced.pt")
 
-    # Export ResNet18
     ckpt = torch.load("coin_resnet18.pt", **load_kw)
     model_resnet = resnet18(weights=None)
     model_resnet.fc = nn.Linear(model_resnet.fc.in_features, NUM_CLASSES)

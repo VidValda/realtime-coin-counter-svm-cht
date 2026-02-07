@@ -78,7 +78,6 @@ namespace
     return 1.0 / coin::Config::SCALE_FACTOR;
   }
 
-  /** Cached classification results to avoid re-classifying on skip frames. */
   struct ClassificationCache
   {
     std::vector<int> class_ids;
@@ -88,7 +87,6 @@ namespace
   };
   static ClassificationCache s_clf_cache;
 
-  /** DL-only: classify with Torch batch inference, with caching for skip frames. */
   cv::Mat draw_coins(const cv::Mat &frame, coin::CoinTracker &tracker,
                      double ratio_px_to_mm, coin::TorchClassifier *torch_clf,
                      const std::string &classifier_name, bool reclassify,
@@ -283,7 +281,7 @@ int main()
       coin::Config::COIN_CNN_TRACED_PATH,
       coin::Config::COIN_RESNET18_TRACED_PATH};
   coin::TorchClassifier torch_cnn, torch_resnet;
-  int classifier_index = 0; // 0 = CNN, 1 = ResNet18
+  int classifier_index = 0;
 
   auto ensure_classifier = [&]() -> bool
   {

@@ -1,10 +1,3 @@
-"""
-Python GUI that replicates coin_counter_cpp/src/main_coin_counter.cpp exactly.
-All tunable parameters from Config, main loop, and paper detection are adjustable.
-Classifier: SVM, KNN, RandomForest, NaiveBayes (1-4) from build dir YAML.
-Run from repo root; set build_dir to coin_counter_cpp/build for classifiers.
-"""
-
 from __future__ import annotations
 
 import collections
@@ -89,7 +82,6 @@ def set_param(key: str, value: Any) -> None:
         _params[key] = value
 
 
-# --- Calibration ---
 def load_calibration_yaml(path: str) -> Optional[dict]:
     try:
         try:
@@ -169,7 +161,6 @@ def diameter_mm_to_radius_px(cx: float, cy: float, diameter_mm: float, ratio_px_
     return max(2, int((diameter_mm / (base_ratio * correction)) / 2))
 
 
-# --- Classifier (OpenCV YAML) ---
 def load_scaler_yaml(path: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[str]]:
     try:
         fs = cv2.FileStorage(path, cv2.FILE_STORAGE_READ)
@@ -202,6 +193,7 @@ def load_opencv_classifier(model_path: str, model_type: str):
         return cv2.ml.SVM_load(model_path)
     except Exception:
         return None
+
 
 class ClassifierHolder:
     def __init__(self):
@@ -239,7 +231,6 @@ class ClassifierHolder:
         return int(ret[1].flat[0]) if isinstance(ret, tuple) and len(ret) > 1 and ret[1].size else int(ret)
 
 
-# --- CornerStabilizer ---
 class CornerStabilizer:
     def __init__(self, window_size: int = 5):
         self._history = collections.deque(maxlen=max(1, window_size))
@@ -254,7 +245,6 @@ class CornerStabilizer:
         return np.mean(self._history, axis=0).astype(np.float32)
 
 
-# --- CoinTrack & CoinTracker ---
 @dataclass
 class CoinTrack:
     center: Tuple[int, int]
@@ -328,7 +318,6 @@ class CoinTracker:
         return [(t.center, t.stable_diameter_mm(min_samples)) for t in self._tracks if t.stable_diameter_mm(min_samples) is not None]
 
 
-# --- Detection pipeline ---
 def preprocess_for_circles(frame: np.ndarray, p: dict) -> np.ndarray:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=p["CLAHE_CLIP"], tileGridSize=(p["CLAHE_GRID"], p["CLAHE_GRID"]))
@@ -418,7 +407,6 @@ def _ensure_odd(k: int) -> int:
 
 
 def find_paper_corners(frame: np.ndarray, p: dict) -> Optional[np.ndarray]:
-    """Paper detection: same pipeline as debug_paper_detection.py (gray + GaussianBlur + medianBlur, LSD)."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray_blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     gray_filtered = cv2.medianBlur(gray_blurred, 7)
@@ -499,7 +487,6 @@ def draw_coins_and_histogram(frame: np.ndarray, tracker: CoinTracker, ratio_px_t
     return display
 
 
-# --- Camera thread ---
 def run_camera_thread(stop_event: threading.Event, classifier_holder: ClassifierHolder, calibration_path_var: tk.StringVar) -> None:
     p = get_params()
     cap = cv2.VideoCapture(p["camera_index"], cv2.CAP_V4L2)
@@ -569,7 +556,6 @@ def run_camera_thread(stop_event: threading.Event, classifier_holder: Classifier
     cv2.destroyAllWindows()
 
 
-# --- GUI ---
 def add_section(parent: ttk.Frame, title: str) -> ttk.LabelFrame:
     return ttk.LabelFrame(parent, text=title, padding=4)
 

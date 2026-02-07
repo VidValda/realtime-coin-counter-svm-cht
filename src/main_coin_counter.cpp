@@ -53,7 +53,6 @@ namespace
               << " | TOTAL=" << t.total_frame_ms << " ms"
               << " (" << (1000.0 / std::max(t.total_frame_ms, 0.001)) << " FPS)\n";
   }
-  /** Resize mat for display if wider than MAX_DISPLAY_WIDTH_PX to reduce memory and GUI pressure. */
   cv::Mat for_display(const cv::Mat &mat)
   {
     if (mat.cols <= coin::Config::MAX_DISPLAY_WIDTH_PX || mat.empty())
@@ -97,7 +96,6 @@ namespace
     return 0;
   }
 
-  /** Cached classification results to avoid re-classifying on skip frames. */
   struct ClassificationCache
   {
     std::vector<int> class_ids;
@@ -113,7 +111,7 @@ namespace
 #ifdef COIN_USE_TORCH
                      int classifier_index, coin::TorchClassifier *torch_clf,
 #else
-                     int /* classifier_index */, void *torch_clf,
+                     int, void *torch_clf,
 #endif
                      bool reclassify, PipelineTimings *out_timings = nullptr)
   {
@@ -216,7 +214,7 @@ namespace
 #ifdef COIN_USE_TORCH
                           int classifier_index, coin::TorchClassifier *torch_clf,
 #else
-                          int /* classifier_index */, void * /* torch_clf */,
+                          int, void *,
 #endif
                           bool skip_detection = false, PipelineTimings *out_timings = nullptr)
   {
@@ -445,7 +443,6 @@ int main()
 
     try
     {
-      // Run expensive paper (LSD) detection only every N frames; reuse last when stable
       const int every_n = std::max(1, coin::Config::PAPER_DETECT_EVERY_N_FRAMES);
       std::optional<cv::Mat> raw_corners;
       auto t_paper = Clock::now();
