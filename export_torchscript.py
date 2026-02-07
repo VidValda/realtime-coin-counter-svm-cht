@@ -2,6 +2,10 @@
 Export coin_cnn.pt and coin_resnet18.pt to TorchScript for C++ (LibTorch) inference.
 Run from project root: python export_torchscript.py
 Output: coin_cnn_traced.pt, coin_resnet18_traced.pt (load with torch::jit::load in C++).
+
+Requires LibTorch 2.5+ on the C++ side; older LibTorch (e.g. 1.x) only supports
+an older file format and will fail with "maximum supported version for reading is 1".
+Use build_with_torch.sh to download a compatible LibTorch.
 """
 import torch
 import torch.nn as nn

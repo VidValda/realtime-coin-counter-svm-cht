@@ -8,6 +8,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef COIN_USE_TORCH
+#include <torch/script.h>
+#endif
+
 namespace coin
 {
 
@@ -37,7 +41,14 @@ namespace coin
                                    const std::vector<std::pair<cv::Point2i, int>> &centers_radii) const;
 
   private:
+#ifdef COIN_USE_TORCH
+    struct Impl
+    {
+      torch::jit::script::Module module;
+    };
+#else
     struct Impl;
+#endif
     std::unique_ptr<Impl> module_;
   };
 

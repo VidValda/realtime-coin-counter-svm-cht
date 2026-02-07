@@ -1,6 +1,7 @@
 #include "torch_classifier.hpp"
 #include "config.hpp"
 #include <torch/script.h>
+#include <ATen/core/grad_mode.h>
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 #include <algorithm>
@@ -16,47 +17,42 @@ namespace coin
     constexpr int CROP = Config::COIN_CROP_SIZE;
   }
 
-  struct TorchClassifier::Impl
+  /** Extract 150x150 crop centered at (cx,cy); pad with black if out of bounds. */
+  static cv::Mat extract_crop(const cv::Mat &frame_bgr, int cx, int cy)
   {
-    torch::jit::script::Module module;
-
-    /** Extract 150x150 crop centered at (cx,cy); pad with black if out of bounds. */
-    static cv::Mat extract_crop(const cv::Mat &frame_bgr, int cx, int cy)
+    const int h = frame_bgr.rows, w = frame_bgr.cols;
+    const int half = CROP / 2;
+    int x0 = cx - half, y0 = cy - half;
+    int x1 = x0 + CROP, y1 = y0 + CROP;
+    cv::Mat out = cv::Mat::zeros(CROP, CROP, frame_bgr.type());
+    int src_x0 = std::max(0, x0), src_y0 = std::max(0, y0);
+    int src_x1 = std::min(w, x1), src_y1 = std::min(h, y1);
+    int dst_x0 = src_x0 - x0, dst_y0 = src_y0 - y0;
+    int dst_x1 = dst_x0 + (src_x1 - src_x0), dst_y1 = dst_y0 + (src_y1 - src_y0);
+    if (dst_x1 > dst_x0 && dst_y1 > dst_y0)
     {
-      const int h = frame_bgr.rows, w = frame_bgr.cols;
-      const int half = CROP / 2;
-      int x0 = cx - half, y0 = cy - half;
-      int x1 = x0 + CROP, y1 = y0 + CROP;
-      cv::Mat out = cv::Mat::zeros(CROP, CROP, frame_bgr.type());
-      int src_x0 = std::max(0, x0), src_y0 = std::max(0, y0);
-      int src_x1 = std::min(w, x1), src_y1 = std::min(h, y1);
-      int dst_x0 = src_x0 - x0, dst_y0 = src_y0 - y0;
-      int dst_x1 = dst_x0 + (src_x1 - src_x0), dst_y1 = dst_y0 + (src_y1 - src_y0);
-      if (dst_x1 > dst_x0 && dst_y1 > dst_y0)
-      {
-        cv::Mat src_roi = frame_bgr(cv::Rect(src_x0, src_y0, src_x1 - src_x0, src_y1 - src_y0));
-        src_roi.copyTo(out(cv::Rect(dst_x0, dst_y0, dst_x1 - dst_x0, dst_y1 - dst_y0)));
-      }
-      return out;
+      cv::Mat src_roi = frame_bgr(cv::Rect(src_x0, src_y0, src_x1 - src_x0, src_y1 - src_y0));
+      src_roi.copyTo(out(cv::Rect(dst_x0, dst_y0, dst_x1 - dst_x0, dst_y1 - dst_y0)));
     }
+    return out;
+  }
 
-    /** Convert BGR 150x150 OpenCV mat to 1x3x150x150 float tensor (ImageNet normalize). */
-    static torch::Tensor mat_to_tensor(const cv::Mat &bgr)
+  /** Convert BGR 150x150 OpenCV mat to 1x3x150x150 float tensor (ImageNet normalize). */
+  static torch::Tensor mat_to_tensor(const cv::Mat &bgr)
+  {
+    cv::Mat rgb;
+    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+    if (rgb.isContinuous())
+      rgb = rgb.clone();
+    torch::Tensor t = torch::from_blob(rgb.data, {CROP, CROP, 3}, torch::kByte);
+    t = t.permute({2, 0, 1}).to(torch::kFloat32).div(255.0);
+    t = t.unsqueeze(0);
+    for (int c = 0; c < 3; ++c)
     {
-      cv::Mat rgb;
-      cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
-      if (rgb.isContinuous())
-        rgb = rgb.clone();
-      torch::Tensor t = torch::from_blob(rgb.data, {CROP, CROP, 3}, torch::kByte);
-      t = t.permute({2, 0, 1}).to(torch::kFloat32).div(255.0);
-      t = t.unsqueeze(0);
-      for (int c = 0; c < 3; ++c)
-      {
-        t[0][c] = (t[0][c] - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
-      }
-      return t;
+      t[0][c] = (t[0][c] - IMAGENET_MEAN[c]) / IMAGENET_STD[c];
     }
-  };
+    return t;
+  }
 
   bool TorchClassifier::load(const std::string &model_path)
   {
@@ -79,9 +75,9 @@ namespace coin
   {
     if (!module_)
       return 0;
-    torch::NoGradGuard no_grad;
-    cv::Mat crop = Impl::extract_crop(frame_bgr, center.x, center.y);
-    torch::Tensor input = Impl::mat_to_tensor(crop);
+    at::NoGradGuard no_grad;
+    cv::Mat crop = extract_crop(frame_bgr, center.x, center.y);
+    torch::Tensor input = mat_to_tensor(crop);
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(input);
     torch::Tensor output = module_->module.forward(inputs).toTensor();
@@ -96,15 +92,16 @@ namespace coin
     if (!module_ || centers_radii.empty())
       return out;
     out.resize(centers_radii.size());
-    torch::NoGradGuard no_grad;
+    at::NoGradGuard no_grad;
     std::vector<torch::Tensor> tensors;
     tensors.reserve(centers_radii.size());
     for (const auto &cr : centers_radii)
     {
-      cv::Mat crop = Impl::extract_crop(frame_bgr, cr.first.x, cr.first.y);
-      tensors.push_back(Impl::mat_to_tensor(crop));
+      cv::Mat crop = extract_crop(frame_bgr, cr.first.x, cr.first.y);
+      tensors.push_back(mat_to_tensor(crop));
     }
-    torch::Tensor batch = torch::stack(tensors, 0);
+    // stack([1,3,H,W], ...) -> [N,1,3,H,W]; model expects [N,3,H,W]
+    torch::Tensor batch = torch::stack(tensors, 0).squeeze(1);
     std::vector<torch::jit::IValue> inputs;
     inputs.push_back(batch);
     torch::Tensor output = module_->module.forward(inputs).toTensor();

@@ -77,11 +77,14 @@ namespace coin
     /** Run coin detection at this scale (0.5 = half res). Detection results scaled back. */
     static constexpr double COIN_DETECT_SCALE = 1;
 
+    /** Run find_paper_corners every this many frames (1 = every frame). Higher values reduce CPU when paper is stable. */
+    static constexpr int PAPER_DETECT_EVERY_N_FRAMES = 5;
+
     /** Max width for display windows (imshow). Reduces memory and avoids GUI backend issues. */
     static constexpr int MAX_DISPLAY_WIDTH_PX = 960;
 
     /** If true, fill and show debug windows (Markers, Segmentation, Binary, Sure FG, Distance). Slower. */
-    static constexpr bool SHOW_DEBUG_VIEWS = true;
+    static constexpr bool SHOW_DEBUG_VIEWS = false;
 
     static constexpr int CLUSTER_COLORS_BGR[6][3] = {
         {180, 119, 31}, {14, 127, 255}, {44, 160, 44}, {40, 39, 214}, {189, 103, 148}, {75, 86, 140}};

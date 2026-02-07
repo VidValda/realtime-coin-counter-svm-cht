@@ -14,7 +14,23 @@ if(USE_SYSTEM_OPENCV)
   endif()
 endif()
 find_package(OpenCV REQUIRED)
-find_package(Torch QUIET)
+
+# LibTorch (optional): set USE_TORCH=ON and point to LibTorch so find_package(Torch) can find it.
+# Example: cmake -DUSE_TORCH=ON -DCMAKE_PREFIX_PATH=/path/to/libtorch ..
+# Or:     cmake -DUSE_TORCH=ON -DLibTorch_DIR=/path/to/libtorch/share/cmake/Torch ..
+option(USE_TORCH "Build with LibTorch for CNN/ResNet classifiers" OFF)
+if(USE_TORCH)
+  if(DEFINED LibTorch_DIR)
+    list(APPEND CMAKE_PREFIX_PATH "${LibTorch_DIR}")
+  endif()
+  find_package(Torch REQUIRED)
+  message(STATUS "Building with LibTorch: ${Torch_DIR}")
+else()
+  find_package(Torch QUIET)
+  if(Torch_FOUND)
+    message(STATUS "LibTorch found; building with Torch support")
+  endif()
+endif()
 
 # Link all standard OpenCV modules we need (core, imgproc, videoio, highgui, ml, imgcodecs).
 # With system OpenCV this avoids OpenEXR version mismatch; with /usr/local OpenCV you may
@@ -36,7 +52,12 @@ target_link_libraries(coin_common PUBLIC ${OPENCV_LIBS_COIN})
 
 if(Torch_FOUND)
   target_sources(coin_common PRIVATE src/torch_classifier.cpp)
-  target_link_libraries(coin_common PUBLIC ${TORCH_LIBRARIES})
+  # Prefer imported target (LibTorch 1.9+); fallback for older configs
+  if(TARGET torch::torch)
+    target_link_libraries(coin_common PUBLIC torch::torch)
+  else()
+    target_link_libraries(coin_common PUBLIC ${TORCH_LIBRARIES})
+  endif()
   target_compile_definitions(coin_common PUBLIC COIN_USE_TORCH=1)
 endif()
 

@@ -12,6 +12,25 @@ namespace coin
 
   static int ensure_odd(int k) { return std::max(1, k | 1); }
 
+  /** Reusable buffers for detect_and_measure_coins to avoid per-frame reallocations. */
+  struct DetectionWorkspace
+  {
+    cv::Size size{0, 0};
+    cv::Mat binary, dist, sure_fg, label_mask;
+    void ensure_size(int rows, int cols)
+    {
+      if (size.height != rows || size.width != cols)
+      {
+        size = cv::Size(cols, rows);
+        binary.create(rows, cols, CV_8UC1);
+        dist.create(rows, cols, CV_32F);
+        sure_fg.create(rows, cols, CV_8UC1);
+        label_mask.create(rows, cols, CV_8UC1);
+      }
+    }
+  };
+  static DetectionWorkspace s_workspace;
+
   /** Get single channel for watershed: 0=Gray, 1=H, 2=S, 3=V, 4=L, 5=A, 6=B */
   static cv::Mat get_channel(const cv::Mat &frame, int mode)
   {
@@ -111,85 +130,82 @@ namespace coin
     if (pixel_scale <= 0)
       pixel_scale = 1.0;
     const double min_contour_area = Config::MIN_CONTOUR_AREA * pixel_scale * pixel_scale;
+    const int rows = frame.rows, cols = frame.cols;
+    s_workspace.ensure_size(rows, cols);
 
     cv::Mat blurred = preprocess_for_watershed(frame);
 
-    // 1. Threshold: Otsu or Adaptive
-    cv::Mat binary;
+    // 1. Threshold: Otsu or Adaptive (reuse workspace.binary)
     if (Config::USE_ADAPTIVE)
     {
       int block = ensure_odd(std::max(3, std::min(51, Config::ADAPTIVE_BLOCK)));
-      cv::adaptiveThreshold(blurred, binary, 255,
+      cv::adaptiveThreshold(blurred, s_workspace.binary, 255,
                             cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY_INV,
                             block, Config::ADAPTIVE_C);
     }
     else
     {
-      cv::threshold(blurred, binary, 0, 255, cv::THRESH_BINARY_INV + cv::THRESH_OTSU);
+      cv::threshold(blurred, s_workspace.binary, 0, 255, cv::THRESH_BINARY_INV + cv::THRESH_OTSU);
     }
     if (Config::INVERT_BINARY)
-      cv::bitwise_not(binary, binary);
+      cv::bitwise_not(s_workspace.binary, s_workspace.binary);
 
-    // 2. Morphological open
+    // 2. Morphological open (one temp)
     int k_open = ensure_odd(std::max(1, Config::MORPH_OPEN_SIZE));
     cv::Mat k_open_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_open, k_open));
     cv::Mat after_open;
-    cv::morphologyEx(binary, after_open, cv::MORPH_OPEN, k_open_el,
+    cv::morphologyEx(s_workspace.binary, after_open, cv::MORPH_OPEN, k_open_el,
                      cv::Point(-1, -1), std::max(0, Config::MORPH_OPEN_ITERS));
 
-    // 3. Morphological close
+    // 3. Morphological close -> back into workspace.binary
     int k_close = ensure_odd(std::max(1, Config::MORPH_CLOSE_SIZE));
     cv::Mat k_close_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_close, k_close));
-    cv::Mat after_close;
-    cv::morphologyEx(after_open, after_close, cv::MORPH_CLOSE, k_close_el,
+    cv::morphologyEx(after_open, s_workspace.binary, cv::MORPH_CLOSE, k_close_el,
                      cv::Point(-1, -1), std::max(0, Config::MORPH_CLOSE_ITERS));
-    binary = after_close;
 
     // 4. Sure background
     int k_bg = ensure_odd(std::max(1, Config::BG_DILATE_SIZE));
     cv::Mat k_bg_el = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(k_bg, k_bg));
     cv::Mat sure_bg;
-    cv::dilate(binary, sure_bg, k_bg_el);
+    cv::dilate(s_workspace.binary, sure_bg, k_bg_el);
 
-    // 5. Distance transform -> sure foreground
+    // 5. Distance transform -> sure foreground (reuse workspace.dist, workspace.sure_fg)
     int dsize = (Config::DIST_MASK_SIZE >= 4) ? 5 : 3;
-    cv::Mat dist;
-    cv::distanceTransform(binary, dist, cv::DIST_L2, dsize);
+    cv::distanceTransform(s_workspace.binary, s_workspace.dist, cv::DIST_L2, dsize);
     double dist_max;
-    cv::minMaxLoc(dist, nullptr, &dist_max);
+    cv::minMaxLoc(s_workspace.dist, nullptr, &dist_max);
 
     if (out_debug && dist_max > 0)
     {
       cv::Mat dist_norm;
-      cv::normalize(dist, dist_norm, 0, 255, cv::NORM_MINMAX);
+      cv::normalize(s_workspace.dist, dist_norm, 0, 255, cv::NORM_MINMAX);
       dist_norm.convertTo(out_debug->dist_vis, CV_8UC1);
     }
     if (dist_max <= 0)
       return {};
 
     double frac = std::max(0.2, std::min(0.6, Config::WATERSHED_FG_FRAC));
-    cv::Mat sure_fg;
-    cv::threshold(dist, sure_fg, frac * dist_max, 255, cv::THRESH_BINARY);
-    sure_fg.convertTo(sure_fg, CV_8UC1);
+    cv::threshold(s_workspace.dist, s_workspace.sure_fg, frac * dist_max, 255, cv::THRESH_BINARY);
+    s_workspace.sure_fg.convertTo(s_workspace.sure_fg, CV_8UC1);
 
     if (out_debug)
-      sure_fg.copyTo(out_debug->sure_fg);
+      s_workspace.sure_fg.copyTo(out_debug->sure_fg);
     if (out_debug)
-      binary.copyTo(out_debug->binary);
+      s_workspace.binary.copyTo(out_debug->binary);
 
     // 6. Unknown = sure_bg - sure_fg
     cv::Mat unknown;
-    cv::subtract(sure_bg, sure_fg, unknown);
+    cv::subtract(sure_bg, s_workspace.sure_fg, unknown);
 
     // 7. Markers: connected components on sure_fg, then mark unknown as 0
     cv::Mat markers;
-    int num_labels = cv::connectedComponents(sure_fg, markers);
+    int num_labels = cv::connectedComponents(s_workspace.sure_fg, markers);
     markers.convertTo(markers, CV_32S);
     markers += 1;
     markers.setTo(0, unknown);
 
-    // Marker visualization (color by label)
-    if (!markers.empty())
+    // Marker visualization (color by label) — build once, show once
+    if (out_debug && !markers.empty())
     {
       cv::Mat markers_vis = cv::Mat::zeros(markers.rows, markers.cols, CV_8UC3);
       std::mt19937 rng(42);
@@ -198,13 +214,13 @@ namespace coin
       {
         cv::Vec3b c(static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)), static_cast<uchar>(u(rng)));
         markers_vis.setTo(c, markers == lid);
-        cv::imshow("Debug: Markers", markers_vis);
       }
+      out_debug->markers_vis = markers_vis;
     }
 
     // 8. Watershed (requires 3-channel image)
     cv::Mat watershed_input;
-    cv::cvtColor(after_close, watershed_input, cv::COLOR_GRAY2BGR);
+    cv::cvtColor(s_workspace.binary, watershed_input, cv::COLOR_GRAY2BGR);
     cv::Mat markers_out = markers.clone();
     cv::watershed(watershed_input, markers_out);
 
@@ -237,10 +253,16 @@ namespace coin
     }
     for (int label = 2; label <= num_labels; ++label)
     {
-      cv::Mat mask = (markers_out == label);
-      mask.convertTo(mask, CV_8UC1, 255);
+      // Reuse single buffer: fill label_mask without allocating (markers_out == label) per label
+      for (int r = 0; r < markers_out.rows; ++r)
+      {
+        const int *mr = markers_out.ptr<int>(r);
+        uchar *lm = s_workspace.label_mask.ptr<uchar>(r);
+        for (int c = 0; c < markers_out.cols; ++c)
+          lm[c] = (mr[c] == label) ? 255 : 0;
+      }
       std::vector<std::vector<cv::Point>> contours;
-      cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+      cv::findContours(s_workspace.label_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
       if (contours.empty())
         continue;
       const auto &cnt = *std::max_element(contours.begin(), contours.end(),
@@ -271,9 +293,8 @@ namespace coin
       if (out_debug && !segmentation_vis.empty() && label < static_cast<int>(seg_palette.size()))
       {
         const cv::Vec3b &c = seg_palette[label];
-        // Draw colors directly on mask areas with high opacity
         cv::Mat colored_layer(segmentation_vis.size(), CV_8UC3, cv::Scalar::all(0));
-        colored_layer.setTo(c, mask);
+        colored_layer.setTo(c, s_workspace.label_mask);
         cv::addWeighted(segmentation_vis, 0.2, colored_layer, 0.8, 0, segmentation_vis);
       }
     }
@@ -390,16 +411,22 @@ namespace coin
   std::optional<CoinFeature> sample_mean_lab_inside_circle(const cv::Mat &frame_bgr,
                                                            cv::Point2i center, int radius_px)
   {
-    int h = frame_bgr.rows, w = frame_bgr.cols;
+    cv::Mat lab;
+    cv::cvtColor(frame_bgr, lab, cv::COLOR_BGR2Lab);
+    return sample_mean_lab_inside_circle_from_lab(lab, center, radius_px);
+  }
+
+  std::optional<CoinFeature> sample_mean_lab_inside_circle_from_lab(const cv::Mat &frame_lab,
+                                                                    cv::Point2i center, int radius_px)
+  {
+    int h = frame_lab.rows, w = frame_lab.cols;
     int cx = center.x, cy = center.y;
     int inner_r = std::max(2, static_cast<int>(radius_px * 0.7));
     int y0 = std::max(0, cy - inner_r), y1 = std::min(h, cy + inner_r + 1);
     int x0 = std::max(0, cx - inner_r), x1 = std::min(w, cx + inner_r + 1);
     if (y1 <= y0 || x1 <= x0)
       return std::nullopt;
-    cv::Mat lab;
-    cv::cvtColor(frame_bgr, lab, cv::COLOR_BGR2Lab);
-    cv::Mat roi = lab(cv::Range(y0, y1), cv::Range(x0, x1));
+    cv::Mat roi = frame_lab(cv::Range(y0, y1), cv::Range(x0, x1));
     cv::Mat mask = cv::Mat::zeros(roi.size(), CV_8UC1);
     for (int y = 0; y < roi.rows; ++y)
     {
@@ -419,14 +446,19 @@ namespace coin
                                                  double ratio_px_to_mm)
   {
     std::vector<CoinFeature> rows;
+    if (entries.empty())
+      return rows;
+    cv::Mat lab;
+    cv::cvtColor(frame_bgr, lab, cv::COLOR_BGR2Lab);
+    rows.reserve(entries.size());
     for (const auto &e : entries)
     {
       int r = diameter_mm_to_radius_px(e.second, ratio_px_to_mm);
-      auto lab = sample_mean_lab_inside_circle(frame_bgr, e.first, r);
-      if (lab.has_value())
+      auto feat = sample_mean_lab_inside_circle_from_lab(lab, e.first, r);
+      if (feat.has_value())
       {
-        lab->diameter_mm = e.second;
-        rows.push_back(*lab);
+        feat->diameter_mm = e.second;
+        rows.push_back(*feat);
       }
     }
     return rows;

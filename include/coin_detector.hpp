@@ -38,6 +38,11 @@ namespace coin
     std::optional<CoinFeature> sample_mean_lab_inside_circle(const cv::Mat &frame_bgr,
                                                              cv::Point2i center, int radius_px);
 
+    /** Same as above but uses pre-converted Lab image (avoids repeated BGR→Lab conversion). */
+    std::optional<CoinFeature> sample_mean_lab_inside_circle_from_lab(const cv::Mat &frame_lab,
+                                                                      cv::Point2i center, int radius_px);
+
+    /** Converts BGR→Lab once, then samples per entry. Prefer over per-call conversion when many coins. */
     std::vector<CoinFeature> collect_coin_features(const cv::Mat &frame_bgr,
                                                    const std::vector<std::pair<cv::Point2i, double>> &entries,
                                                    double ratio_px_to_mm);

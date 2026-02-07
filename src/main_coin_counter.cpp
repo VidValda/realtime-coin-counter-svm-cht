@@ -136,10 +136,10 @@ namespace
     cv::putText(display, oss.str(), cv::Point(20, 62), cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
 #ifdef COIN_USE_TORCH
     cv::putText(display, "Clf: " + classifier_name + " (1-6)", cv::Point(20, 82),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 200, 200), 1);
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(200, 200, 200), 2);
 #else
     cv::putText(display, "Clf: " + classifier_name + " (1-4)", cv::Point(20, 82),
-                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(200, 200, 200), 1);
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(200, 200, 200), 2);
 #endif
 
     return display;
@@ -221,6 +221,8 @@ namespace
 
 int main()
 {
+  cv::setUseOptimized(true);
+
   cv::VideoCapture cap(2, cv::CAP_V4L2);
   if (!cap.isOpened())
   {
@@ -302,9 +304,11 @@ int main()
             << " (press 1-4 to switch)\n";
 #endif
 
+  int frame_count = 0;
+  std::optional<cv::Mat> last_raw_corners;
+
   while (true)
   {
-    double t_frame_start = cv::getTickCount();
     cv::Mat frame;
     if (!cap.read(frame))
     {
@@ -319,12 +323,24 @@ int main()
 
     try
     {
-      auto raw_corners = coin::find_paper_corners(frame);
+      // Run expensive paper (LSD) detection only every N frames; reuse last when stable
+      const int every_n = std::max(1, coin::Config::PAPER_DETECT_EVERY_N_FRAMES);
+      std::optional<cv::Mat> raw_corners;
+      if (every_n <= 1 || (++frame_count % every_n) == 1)
+      {
+        raw_corners = coin::find_paper_corners(frame);
+        if (raw_corners.has_value())
+          last_raw_corners = raw_corners;
+      }
+      else if (last_raw_corners.has_value())
+        raw_corners = last_raw_corners;
+
       std::optional<cv::Mat> stable_corners = raw_corners.has_value()
                                                   ? stabilizer.update(&*raw_corners)
                                                   : stabilizer.update(nullptr);
 
-      if (stable_corners.has_value() && !stable_corners->empty())
+      if (stable_corners.has_value() && !stable_corners->empty() &&
+          stable_corners->rows == 4 && stable_corners->cols >= 2)
       {
         cv::Mat rect = coin::order_corners(*stable_corners);
         cv::Mat M = cv::getPerspectiveTransform(rect, dst_corners);
@@ -333,7 +349,7 @@ int main()
         {
           cv::Mat warped;
           cv::warpPerspective(frame, warped, M, cv::Size(width_px, height_px));
-          if (!warped.empty())
+          if (!warped.empty() && warped.rows > 0 && warped.cols > 0)
           {
 #ifdef COIN_USE_TORCH
             run_coin_detection(warped, ratio_px_to_mm, tracker, svm,
